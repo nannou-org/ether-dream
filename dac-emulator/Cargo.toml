@@ -2,10 +2,16 @@
 name = "ether-dream-dac-emulator"
 version = "0.1.0"
 authors = ["mitchmindtree <mitchell.nordine@gmail.com>"]
+description = "A crate for building and running custom Ether Dream DAC emulators."
+readme = "README.md"
+keywords = ["laser", "emulator", "protocol", "etherdream", "dac"]
+license = "MIT OR Apache-2.0"
+repository = "https://github.com/nannou-org/ether-dream.git"
+homepage = "https://github.com/nannou-org/ether-dream"
 
 [dependencies]
 crossbeam = "0.3"
-ether-dream = { path = "../" }
+ether-dream = "0.1"
 
 [dev-dependencies]
 nannou = "0.5"

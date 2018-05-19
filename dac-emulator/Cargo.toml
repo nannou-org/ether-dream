@@ -1,0 +1,11 @@
+[package]
+name = "ether-dream-dac-emulator"
+version = "0.1.0"
+authors = ["mitchmindtree <mitchell.nordine@gmail.com>"]
+
+[dependencies]
+crossbeam = "0.3"
+ether-dream = { path = "../" }
+
+[dev-dependencies]
+nannou = "0.5"

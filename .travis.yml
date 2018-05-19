@@ -1,0 +1,9 @@
+language: rust
+rust:
+    - nightly
+    - beta
+    - stable
+script:
+    - cargo check -v
+    - cargo test -v
+    - cargo doc -v

@@ -102,6 +102,44 @@ impl Stream {
         self.point_buffer.clear();
         CommandQueue { stream: self }
     }
+
+    /// This directly calls `set_nodelay` on the inner **TcpStream**. In other words, this sets the
+    /// value of the TCP_NODELAY option for this socket.
+    ///
+    /// Note that due to the necessity for very low-latency communication with the DAC, this API
+    /// enables TCP_NODELAY by default. This method is exposed in order to allow the user to
+    /// disable this if they wish.
+    ///
+    /// When not set, data is buffered until there is a sufficient amount to send out, thereby
+    /// avoiding the frequent sending of small packets. Although perhaps more efficient for the
+    /// network, this may result in DAC underflows if **Data** commands are delayed for too long.
+    pub fn set_nodelay(&self, b: bool) -> io::Result<()> {
+        self.tcp_stream.set_nodelay(b)
+    }
+
+    /// Gets the value of the TCP_NODELAY option for this socket.
+    ///
+    /// For more infnormation about this option, see `set_nodelay`.
+    pub fn nodelay(&self) -> io::Result<bool> {
+        self.tcp_stream.nodelay()
+    }
+
+    /// This directly calls `set_ttl` on the inner **TcpStream**. In other words, this sets the
+    /// value for the `IP_TTL` option on this socket.
+    ///
+    /// This value sets the time-to-live field that is used in every packet sent from this socket.
+    /// Time-to-live describes the number of hops between devices that a packet may make before it
+    /// is discarded/ignored.
+    pub fn set_ttl(&self, ttl: u32) -> io::Result<()> {
+        self.tcp_stream.set_ttl(ttl)
+    }
+
+    /// Gets the value of the `IP_TTL` option for this socket.
+    ///
+    /// For more information about this option see `set_ttl`.
+    pub fn ttl(&self) -> io::Result<u32> {
+        self.tcp_stream.ttl()
+    }
 }
 
 // Used within the `Stream::send_command` method.
@@ -412,6 +450,10 @@ impl From<ResponseError> for CommunicationError {
 
 /// Establishes a TCP stream connection with the DAC at the given address.
 ///
+/// `TCP_NODELAY` is enabled on the TCP stream in order for better low-latency/realtime
+/// suitability. If necessary, this can be disabled via the `set_nodelay` method on the returned
+/// **Stream**.
+///
 /// Note that this does not "prepare" the DAC for playback. This must be done manually by
 /// submitting the `prepare_stream` command.
 pub fn connect(
@@ -425,6 +467,9 @@ pub fn connect(
     // Connect the TCP stream.
     let dac_addr = net::SocketAddr::new(dac_ip, protocol::COMMUNICATION_PORT);
     let mut tcp_stream = net::TcpStream::connect(dac_addr)?;
+
+    // Enable `TCP_NODELAY` for better low-latency suitability.
+    tcp_stream.set_nodelay(true)?;
 
     // Initialise a buffer for writing bytes to the TCP stream.
     let mut bytes = vec![];

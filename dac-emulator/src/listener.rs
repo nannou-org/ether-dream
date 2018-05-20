@@ -142,6 +142,60 @@ impl ActiveStream {
     pub fn close(mut self) -> io::Error {
         self.close_inner()
     }
+
+    /// This directly calls `set_nodelay` on the inner **TcpStream**. In other words, this sets the
+    /// value of the TCP_NODELAY option for this socket.
+    ///
+    /// Note that due to the necessity for very low-latency communication with the DAC, this API
+    /// enables `TCP_NODELAY` by default. This method is exposed in order to allow the user to
+    /// disable this if they wish.
+    ///
+    /// When not set, data is buffered until there is a sufficient amount to send out, thereby
+    /// avoiding the frequent sending of small packets. Although perhaps more efficient for the
+    /// network, this may result in DAC underflows if **Data** commands are delayed for too long.
+    pub fn set_nodelay(&self, b: bool) -> io::Result<()> {
+        if let Some((stream_handle, _)) = self.inner.as_ref() {
+            stream_handle.set_nodelay(b)
+        } else {
+            Err(io::Error::new(io::ErrorKind::InvalidInput, "called `set_nodelay` on a closed stream"))
+        }
+    }
+
+    /// Gets the value of the TCP_NODELAY option for this socket.
+    ///
+    /// For more infnormation about this option, see `set_nodelay`.
+    pub fn nodelay(&self) -> io::Result<bool> {
+        if let Some((stream_handle, _)) = self.inner.as_ref() {
+            stream_handle.nodelay()
+        } else {
+            Err(io::Error::new(io::ErrorKind::InvalidInput, "called `nodelay` on a closed stream"))
+        }
+    }
+
+    /// This directly calls `set_ttl` on the inner **TcpStream**. In other words, this sets the
+    /// value for the `IP_TTL` option on this socket.
+    ///
+    /// This value sets the time-to-live field that is used in every packet sent from this socket.
+    /// Time-to-live describes the number of hops between devices that a packet may make before it
+    /// is discarded/ignored.
+    pub fn set_ttl(&self, ttl: u32) -> io::Result<()> {
+        if let Some((stream_handle, _)) = self.inner.as_ref() {
+            stream_handle.set_ttl(ttl)
+        } else {
+            Err(io::Error::new(io::ErrorKind::InvalidInput, "called `set_ttl` on a closed stream"))
+        }
+    }
+
+    /// Gets the value of the `IP_TTL` option for this socket.
+    ///
+    /// For more information about this option see `set_ttl`.
+    pub fn ttl(&self) -> io::Result<u32> {
+        if let Some((stream_handle, _)) = self.inner.as_ref() {
+            stream_handle.ttl()
+        } else {
+            Err(io::Error::new(io::ErrorKind::InvalidInput, "called `ttl` on a closed stream"))
+        }
+    }
 }
 
 impl Drop for ActiveStream {

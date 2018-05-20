@@ -74,6 +74,44 @@ impl Handle {
         self.tcp_stream.shutdown(net::Shutdown::Both).ok();
         self.wait()
     }
+
+    /// This directly calls `set_nodelay` on the inner **TcpStream**. In other words, this sets the
+    /// value of the TCP_NODELAY option for this socket.
+    ///
+    /// Note that due to the necessity for very low-latency communication with the DAC, this API
+    /// enables `TCP_NODELAY` by default. This method is exposed in order to allow the user to
+    /// disable this if they wish.
+    ///
+    /// When not set, data is buffered until there is a sufficient amount to send out, thereby
+    /// avoiding the frequent sending of small packets. Although perhaps more efficient for the
+    /// network, this may result in DAC underflows if **Data** commands are delayed for too long.
+    pub fn set_nodelay(&self, b: bool) -> io::Result<()> {
+        self.tcp_stream.set_nodelay(b)
+    }
+
+    /// Gets the value of the TCP_NODELAY option for this socket.
+    ///
+    /// For more infnormation about this option, see `set_nodelay`.
+    pub fn nodelay(&self) -> io::Result<bool> {
+        self.tcp_stream.nodelay()
+    }
+
+    /// This directly calls `set_ttl` on the inner **TcpStream**. In other words, this sets the
+    /// value for the `IP_TTL` option on this socket.
+    ///
+    /// This value sets the time-to-live field that is used in every packet sent from this socket.
+    /// Time-to-live describes the number of hops between devices that a packet may make before it
+    /// is discarded/ignored.
+    pub fn set_ttl(&self, ttl: u32) -> io::Result<()> {
+        self.tcp_stream.set_ttl(ttl)
+    }
+
+    /// Gets the value of the `IP_TTL` option for this socket.
+    ///
+    /// For more information about this option see `set_ttl`.
+    pub fn ttl(&self) -> io::Result<u32> {
+        self.tcp_stream.ttl()
+    }
 }
 
 impl Stream {
@@ -81,6 +119,9 @@ impl Stream {
     ///
     /// Internally this allocates a buffer of bytes whose size is the size of the largest possible
     /// **Data** command that may be received based on the DAC's buffer capacity.
+    ///
+    /// Enables `TCP_NODELAY` on the given TCP socket in order to adhere to the low-latency,
+    /// realtime requirements.
     ///
     /// This function also spawns a thread used for processing output.
     pub fn new(
@@ -91,6 +132,9 @@ impl Stream {
     {
         // Create and spawn the output processor on its own thread.
         let output_processor = output::Processor::new(output_frame_rate).spawn()?;
+
+        // Enable `TCP_NODELAY`.
+        tcp_stream.set_nodelay(true)?;
 
         // Prepare a buffer with the maximum expected command size.
         let bytes: Box<[u8]> = {

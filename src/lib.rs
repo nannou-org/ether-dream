@@ -51,7 +51,7 @@ impl RecvDacBroadcasts {
 /// ```
 pub fn recv_dac_broadcasts() -> io::Result<RecvDacBroadcasts> {
     let broadcast_port = protocol::BROADCAST_PORT;
-    let broadcast_addr = net::SocketAddrV4::new([255, 255, 255, 255].into(), broadcast_port);
+    let broadcast_addr = net::SocketAddrV4::new([0, 0, 0, 0].into(), broadcast_port);
     let udp_socket = net::UdpSocket::bind(broadcast_addr)?;
     let buffer = [0; RecvDacBroadcasts::BUFFER_LEN];
     Ok(RecvDacBroadcasts { udp_socket, buffer })

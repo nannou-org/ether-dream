@@ -17,7 +17,7 @@ pub struct Stream {
     command_buffer: Vec<QueuedCommand>,
     /// A buffer to re-use for queueing points for `Data` commands.
     point_buffer: Vec<protocol::DacPoint>,
-    /// A buffer used for sending and receiving bytes over TCP.
+    /// A buffer used for efficiently writing and reading bytes to and from TCP.
     bytes: Vec<u8>,
 }
 
@@ -87,21 +87,8 @@ impl Stream {
     }
 
     fn recv_response(&mut self, expected_command: u8) -> Result<(), CommunicationError> {
-        let Stream {
-            ref mut bytes,
-            ref mut tcp_stream,
-            ref mut dac,
-            ..
-        } = *self;
-
-        // Read the response.
-        bytes.resize(protocol::DacResponse::SIZE_BYTES, 0);
-        tcp_stream.read(bytes)?;
-        let response = (&bytes[..]).read_bytes::<protocol::DacResponse>()?;
-        response.check_errors(expected_command)?;
-        // Update the DAC representation.
-        dac.update_status(&response.dac_status)?;
-        Ok(())
+        let Stream { ref mut bytes, ref mut tcp_stream, ref mut dac, ..  } = *self;
+        recv_response(bytes, tcp_stream, dac, expected_command)
     }
 
     /// Borrow the inner DAC to examine its state.
@@ -129,6 +116,24 @@ where
     bytes.clear();
     bytes.write_bytes(command)?;
     tcp_stream.write(bytes)?;
+    Ok(())
+}
+
+// Used within the `Stream::recv_response` and `Stream::connect` methods.
+fn recv_response(
+    bytes: &mut Vec<u8>,
+    tcp_stream: &mut net::TcpStream,
+    dac: &mut dac::Addressed,
+    expected_command: u8,
+) -> Result<(), CommunicationError>
+{
+    // Read the response.
+    bytes.resize(protocol::DacResponse::SIZE_BYTES, 0);
+    tcp_stream.read_exact(bytes)?;
+    let response = (&bytes[..]).read_bytes::<protocol::DacResponse>()?;
+    response.check_errors(expected_command)?;
+    // Update the DAC representation.
+    dac.update_status(&response.dac_status)?;
     Ok(())
 }
 
@@ -425,14 +430,12 @@ pub fn connect(
     let mut bytes = vec![];
 
     // Upon connection, the DAC responds as though it were sent a **Ping** command.
-    bytes.resize(protocol::DacResponse::SIZE_BYTES, 0);
-    tcp_stream.read(&mut bytes)?;
-    {
-        let response = (&bytes[..]).read_bytes::<protocol::DacResponse>()?;
-        response.check_errors(protocol::command::Ping::START_BYTE)?;
-        // Update the DAC representation.
-        dac.update_status(&response.dac_status)?;
-    }
+    recv_response(
+        &mut bytes,
+        &mut tcp_stream,
+        &mut dac,
+        protocol::command::Ping::START_BYTE,
+    )?;
 
     // Create the stream.
     let stream = Stream {

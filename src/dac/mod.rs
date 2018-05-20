@@ -2,9 +2,10 @@
 
 pub mod stream;
 
-use protocol;
+use byteorder;
+use protocol::{self, command, Command as CommandTrait, ReadFromBytes, WriteToBytes};
 use std::error::Error;
-use std::{fmt, ops};
+use std::{fmt, io, ops};
 pub use self::stream::Stream;
 
 /// A DAC along with its broadcasted MAC address.
@@ -184,6 +185,23 @@ bitflags! {
         /// If the buffer is empty, the rate is not changed.
         const CHANGE_RATE = 0b10000000_00000000;
     }
+}
+
+/// A command whose kind is determined at runtime.
+///
+/// This is particularly useful when **Read**ing a command from bytes or from a TCP stream. The
+/// **ReadFromBytes** implementation will automatically determine the kind by reading the first
+/// byte.
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+pub enum Command<'a> {
+    PrepareStream(command::PrepareStream),
+    Begin(command::Begin),
+    PointRate(command::PointRate),
+    Data(command::Data<'a>),
+    Stop(command::Stop),
+    EmergencyStop(command::EmergencyStop),
+    ClearEmergencyStop(command::ClearEmergencyStop),
+    Ping(command::Ping),
 }
 
 /// An error describing a failure to convert a `protocol::DacStatus` to a `Status`.
@@ -428,6 +446,97 @@ impl fmt::Display for MacAddress {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         let a = &self.0;
         write!(f, "{:X}:{:X}:{:X}:{:X}:{:X}:{:X}", a[0], a[1], a[2], a[3], a[4], a[5])
+    }
+}
+
+impl ReadFromBytes for Command<'static> {
+    fn read_from_bytes<R: byteorder::ReadBytesExt>(mut reader: R) -> io::Result<Self> {
+        let command = reader.read_u8()?;
+        let kind = match command {
+            command::PrepareStream::START_BYTE => command::PrepareStream.into(),
+            command::Begin::START_BYTE => command::Begin::read_fields(reader)?.into(),
+            command::PointRate::START_BYTE => command::PointRate::read_fields(reader)?.into(),
+            command::Data::START_BYTE => command::Data::read_fields(reader)?.into(),
+            command::Stop::START_BYTE => command::Stop.into(),
+            command::EmergencyStop::START_BYTE => command::EmergencyStop.into(),
+            command::EmergencyStopAlt::START_BYTE => command::EmergencyStop.into(),
+            command::ClearEmergencyStop::START_BYTE => command::ClearEmergencyStop.into(),
+            command::Ping::START_BYTE => command::Ping.into(),
+            unknown => {
+                let err_msg = format!("invalid command byte \"{}\"", unknown);
+                return Err(io::Error::new(io::ErrorKind::InvalidData, err_msg));
+            }
+        };
+        Ok(kind)
+    }
+}
+
+impl<'a> WriteToBytes for Command<'a> {
+    fn write_to_bytes<W: byteorder::WriteBytesExt>(&self, writer: W) -> io::Result<()> {
+        match *self {
+            Command::PrepareStream(ref cmd) => cmd.write_to_bytes(writer),
+            Command::Begin(ref cmd) => cmd.write_to_bytes(writer),
+            Command::PointRate(ref cmd) => cmd.write_to_bytes(writer),
+            Command::Data(ref cmd) => cmd.write_to_bytes(writer),
+            Command::Stop(ref cmd) => cmd.write_to_bytes(writer),
+            Command::EmergencyStop(ref cmd) => cmd.write_to_bytes(writer),
+            Command::ClearEmergencyStop(ref cmd) => cmd.write_to_bytes(writer),
+            Command::Ping(ref cmd) => cmd.write_to_bytes(writer),
+        }
+    }
+}
+
+impl<'a> From<command::PrepareStream> for Command<'a> {
+    fn from(command: command::PrepareStream) -> Self {
+        Command::PrepareStream(command)
+    }
+}
+
+impl<'a> From<command::Begin> for Command<'a> {
+    fn from(command: command::Begin) -> Self {
+        Command::Begin(command)
+    }
+}
+
+impl<'a> From<command::PointRate> for Command<'a> {
+    fn from(command: command::PointRate) -> Self {
+        Command::PointRate(command)
+    }
+}
+
+impl<'a> From<command::Data<'a>> for Command<'a> {
+    fn from(command: command::Data<'a>) -> Self {
+        Command::Data(command)
+    }
+}
+
+impl<'a> From<command::Stop> for Command<'a> {
+    fn from(command: command::Stop) -> Self {
+        Command::Stop(command)
+    }
+}
+
+impl<'a> From<command::EmergencyStop> for Command<'a> {
+    fn from(command: command::EmergencyStop) -> Self {
+        Command::EmergencyStop(command)
+    }
+}
+
+impl<'a> From<command::EmergencyStopAlt> for Command<'a> {
+    fn from(_: command::EmergencyStopAlt) -> Self {
+        Command::EmergencyStop(command::EmergencyStop)
+    }
+}
+
+impl<'a> From<command::ClearEmergencyStop> for Command<'a> {
+    fn from(command: command::ClearEmergencyStop) -> Self {
+        Command::ClearEmergencyStop(command)
+    }
+}
+
+impl<'a> From<command::Ping> for Command<'a> {
+    fn from(command: command::Ping) -> Self {
+        Command::Ping(command)
     }
 }
 

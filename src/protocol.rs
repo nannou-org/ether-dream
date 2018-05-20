@@ -538,6 +538,84 @@ pub mod command {
     #[derive(Copy, Clone, Debug, PartialEq, Eq, Hash)]
     pub struct Ping;
 
+    impl Begin {
+        /// Consecutively read the fields of the **Begin** type and return a **Begin** instance.
+        ///
+        /// Note that if reading from a stream, this method assumes that the starting command byte
+        /// has already been read.
+        pub fn read_fields<R: ReadBytesExt>(mut reader: R) -> io::Result<Self> {
+            let low_water_mark = reader.read_u16::<LE>()?;
+            let point_rate = reader.read_u32::<LE>()?;
+            let begin = Begin { low_water_mark, point_rate };
+            Ok(begin)
+        }
+    }
+
+    impl PointRate {
+        /// Consecutively read the fields of the **PointRate** type and return a **PointRate** instance.
+        ///
+        /// Note that if reading from a stream, this method assumes that the starting command byte
+        /// has already been read.
+        pub fn read_fields<R: ReadBytesExt>(mut reader: R) -> io::Result<Self> {
+            let point_rate = PointRate(reader.read_u32::<LE>()?);
+            Ok(point_rate)
+        }
+    }
+
+    impl<'a> Data<'a> {
+        /// Read the `u16` representing the number of points within the **Data** from the given
+        /// `reader`.
+        ///
+        /// This method is useful for determining how many more bytes should be read from a stream.
+        ///
+        /// Note that if reading from a stream, this method assumes that the starting command byte
+        /// has already been read.
+        pub fn read_n_points<R>(mut reader: R) -> io::Result<u16>
+        where
+            R: ReadBytesExt,
+        {
+            reader.read_u16::<LE>()
+        }
+
+        /// Read and append the given number of points into the given Vec of **DacPoint**s.
+        ///
+        /// This method is useful as an alternative to **Self::read_fields** or
+        /// **Self::read_from_bytes** as it allows for re-using a buffer of points rather than
+        /// dynamically allocating a new one each time.
+        ///
+        /// Note that if reading from a stream, this method assumes that the starting command byte
+        /// and the `u16` representing the number of points have both already been read.
+        pub fn read_points<R>(
+            mut reader: R,
+            mut n_points: u16,
+            points: &mut Vec<DacPoint>,
+        ) -> io::Result<()>
+        where
+            R: ReadBytesExt,
+        {
+            while n_points > 0 {
+                let dac_point = reader.read_bytes::<DacPoint>()?;
+                points.push(dac_point);
+                n_points -= 1;
+            }
+            Ok(())
+        }
+    }
+
+    impl Data<'static> {
+        /// Consecutively read the fields of the **Data** type and return a **Data** instance.
+        ///
+        /// Note that if reading from a stream, this method assumes that the starting command byte
+        /// has already been read.
+        pub fn read_fields<R: ReadBytesExt>(mut reader: R) -> io::Result<Self> {
+            let n_points = Self::read_n_points(&mut reader)?;
+            let mut data = Vec::with_capacity(n_points as _);
+            Self::read_points(reader, n_points, &mut data)?;
+            let data = Data { points: Cow::Owned(data) };
+            Ok(data)
+        }
+    }
+
     impl<'a, C> Command for &'a C
     where
         C: Command,
@@ -700,10 +778,7 @@ pub mod command {
                 let err_msg = "invalid \"begin\" command byte";
                 return Err(io::Error::new(io::ErrorKind::InvalidData, err_msg));
             }
-            let low_water_mark = reader.read_u16::<LE>()?;
-            let point_rate = reader.read_u32::<LE>()?;
-            let begin = Begin { low_water_mark, point_rate };
-            Ok(begin)
+            Self::read_fields(reader)
         }
     }
 
@@ -713,8 +788,7 @@ pub mod command {
                 let err_msg = "invalid \"queue change\" command byte";
                 return Err(io::Error::new(io::ErrorKind::InvalidData, err_msg));
             }
-            let point_rate = PointRate(reader.read_u32::<LE>()?);
-            Ok(point_rate)
+            Self::read_fields(reader)
         }
     }
 
@@ -724,16 +798,7 @@ pub mod command {
                 let err_msg = "invalid \"data\" command byte";
                 return Err(io::Error::new(io::ErrorKind::InvalidData, err_msg));
             }
-            let n_points = reader.read_u16::<LE>()?;
-            let mut data = Vec::with_capacity(n_points as _);
-            let mut points = n_points;
-            while points > 0 {
-                let dac_point = reader.read_bytes::<DacPoint>()?;
-                data.push(dac_point);
-                points -= 1;
-            }
-            let data = Data { points: Cow::Owned(data) };
-            Ok(data)
+            Self::read_fields(reader)
         }
     }
 

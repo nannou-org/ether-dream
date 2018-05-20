@@ -53,50 +53,6 @@ pub enum InterpretedCommand {
     Unknown { start_byte: u8 }
 }
 
-/// Attempt to interpret the given bytes as a **Command**.
-///
-/// **Panics** if the given slice of bytes is empty.
-pub fn interpret_command(mut bytes: &[u8]) -> io::Result<InterpretedCommand> {
-    let interpreted_command = match bytes[0] {
-        command::PrepareStream::START_BYTE => {
-            let prepare_stream = bytes.read_bytes::<command::PrepareStream>()?;
-            Command::PrepareStream(prepare_stream).into()
-        },
-        command::Begin::START_BYTE => {
-            let begin = bytes.read_bytes::<command::Begin>()?;
-            Command::Begin(begin).into()
-        },
-        command::PointRate::START_BYTE => {
-            let point_rate = bytes.read_bytes::<command::PointRate>()?;
-            Command::PointRate(point_rate).into()
-        },
-        command::Data::START_BYTE => {
-            let data = bytes.read_bytes::<command::Data<'static>>()?;
-            Command::Data(data).into()
-        },
-        command::Stop::START_BYTE => {
-            let stop = bytes.read_bytes::<command::Stop>()?;
-            Command::Stop(stop).into()
-        },
-        command::EmergencyStop::START_BYTE => {
-            let emergency_stop = bytes.read_bytes::<command::EmergencyStop>()?;
-            Command::EmergencyStop(emergency_stop).into()
-        },
-        command::ClearEmergencyStop::START_BYTE => {
-            let clear_emergency_stop = bytes.read_bytes::<command::ClearEmergencyStop>()?;
-            Command::ClearEmergencyStop(clear_emergency_stop).into()
-        },
-        command::Ping::START_BYTE => {
-            let ping = bytes.read_bytes::<command::Ping>()?;
-            Command::Ping(ping).into()
-        },
-        start_byte => {
-            InterpretedCommand::Unknown { start_byte }
-        },
-    };
-    Ok(interpreted_command)
-}
-
 impl Handle {
     /// Produce a handle to the **Output** of the stream.
     ///
@@ -118,6 +74,44 @@ impl Handle {
         self.tcp_stream.shutdown(net::Shutdown::Both).ok();
         self.wait()
     }
+
+    /// This directly calls `set_nodelay` on the inner **TcpStream**. In other words, this sets the
+    /// value of the TCP_NODELAY option for this socket.
+    ///
+    /// Note that due to the necessity for very low-latency communication with the DAC, this API
+    /// enables `TCP_NODELAY` by default. This method is exposed in order to allow the user to
+    /// disable this if they wish.
+    ///
+    /// When not set, data is buffered until there is a sufficient amount to send out, thereby
+    /// avoiding the frequent sending of small packets. Although perhaps more efficient for the
+    /// network, this may result in DAC underflows if **Data** commands are delayed for too long.
+    pub fn set_nodelay(&self, b: bool) -> io::Result<()> {
+        self.tcp_stream.set_nodelay(b)
+    }
+
+    /// Gets the value of the TCP_NODELAY option for this socket.
+    ///
+    /// For more infnormation about this option, see `set_nodelay`.
+    pub fn nodelay(&self) -> io::Result<bool> {
+        self.tcp_stream.nodelay()
+    }
+
+    /// This directly calls `set_ttl` on the inner **TcpStream**. In other words, this sets the
+    /// value for the `IP_TTL` option on this socket.
+    ///
+    /// This value sets the time-to-live field that is used in every packet sent from this socket.
+    /// Time-to-live describes the number of hops between devices that a packet may make before it
+    /// is discarded/ignored.
+    pub fn set_ttl(&self, ttl: u32) -> io::Result<()> {
+        self.tcp_stream.set_ttl(ttl)
+    }
+
+    /// Gets the value of the `IP_TTL` option for this socket.
+    ///
+    /// For more information about this option see `set_ttl`.
+    pub fn ttl(&self) -> io::Result<u32> {
+        self.tcp_stream.ttl()
+    }
 }
 
 impl Stream {
@@ -125,6 +119,9 @@ impl Stream {
     ///
     /// Internally this allocates a buffer of bytes whose size is the size of the largest possible
     /// **Data** command that may be received based on the DAC's buffer capacity.
+    ///
+    /// Enables `TCP_NODELAY` on the given TCP socket in order to adhere to the low-latency,
+    /// realtime requirements.
     ///
     /// This function also spawns a thread used for processing output.
     pub fn new(
@@ -135,6 +132,9 @@ impl Stream {
     {
         // Create and spawn the output processor on its own thread.
         let output_processor = output::Processor::new(output_frame_rate).spawn()?;
+
+        // Enable `TCP_NODELAY`.
+        tcp_stream.set_nodelay(true)?;
 
         // Prepare a buffer with the maximum expected command size.
         let bytes: Box<[u8]> = {
@@ -200,6 +200,87 @@ impl Stream {
     }
 }
 
+impl InterpretedCommand {
+    /// Read a single command from the TCP stream and return it.
+    ///
+    /// This method blocks until the exact number of bytes necessary for the returned command are
+    /// read.
+    pub fn read_from_tcp_stream(
+        bytes: &mut [u8],
+        tcp_stream: &mut net::TcpStream,
+    ) -> io::Result<Self>
+    {
+        // Peek the first byte to determine the command kind.
+        bytes[0] = 0u8;
+        let len = tcp_stream.peek(&mut bytes[..1])?;
+
+        // Empty messages should only happen if the stream has closed.
+        if len == 0 {
+            return Err(io::Error::new(io::ErrorKind::InvalidData, "read `0` bytes from tcp stream"));
+        }
+
+        // Read the rest of the command from the stream based on the starting byte.
+        let interpreted_command = match bytes[0] {
+            command::PrepareStream::START_BYTE => {
+                tcp_stream.read_exact(&mut bytes[..command::PrepareStream::SIZE_BYTES])?;
+                let prepare_stream = (&bytes[..]).read_bytes::<command::PrepareStream>()?;
+                Command::PrepareStream(prepare_stream).into()
+            },
+            command::Begin::START_BYTE => {
+                tcp_stream.read_exact(&mut bytes[..command::Begin::SIZE_BYTES])?;
+                let begin = (&bytes[..]).read_bytes::<command::Begin>()?;
+                Command::Begin(begin).into()
+            },
+            command::PointRate::START_BYTE => {
+                tcp_stream.read_exact(&mut bytes[..command::PointRate::SIZE_BYTES])?;
+                let point_rate = (&bytes[..]).read_bytes::<command::PointRate>()?;
+                Command::PointRate(point_rate).into()
+            },
+            command::Data::START_BYTE => {
+                // Read the number of points.
+                let command_bytes = 1;
+                let n_points_bytes = 2;
+                let n_points_start = command_bytes;
+                let n_points_end = n_points_start + n_points_bytes;
+                tcp_stream.peek(&mut bytes[..n_points_end])?;
+                let n_points = command::Data::read_n_points(&bytes[n_points_start..n_points_end])?;
+
+                // Use the number of points to determine how many bytes to read.
+                let data_bytes = n_points as usize * protocol::DacPoint::SIZE_BYTES;
+                let total_bytes = command_bytes + n_points_bytes + data_bytes;
+                tcp_stream.read_exact(&mut bytes[..total_bytes])?;
+                let data = (&bytes[..]).read_bytes::<command::Data<'static>>()?;
+                Command::Data(data).into()
+            },
+            command::Stop::START_BYTE => {
+                tcp_stream.read_exact(&mut bytes[..command::Stop::SIZE_BYTES])?;
+                let stop = (&bytes[..]).read_bytes::<command::Stop>()?;
+                Command::Stop(stop).into()
+            },
+            command::EmergencyStop::START_BYTE => {
+                tcp_stream.read_exact(&mut bytes[..command::EmergencyStop::SIZE_BYTES])?;
+                let emergency_stop = (&bytes[..]).read_bytes::<command::EmergencyStop>()?;
+                Command::EmergencyStop(emergency_stop).into()
+            },
+            command::ClearEmergencyStop::START_BYTE => {
+                tcp_stream.read_exact(&mut bytes[..command::ClearEmergencyStop::SIZE_BYTES])?;
+                let clear_emergency_stop = (&bytes[..]).read_bytes::<command::ClearEmergencyStop>()?;
+                Command::ClearEmergencyStop(clear_emergency_stop).into()
+            },
+            command::Ping::START_BYTE => {
+                tcp_stream.read_exact(&mut bytes[..command::Ping::SIZE_BYTES])?;
+                let ping = (&bytes[..]).read_bytes::<command::Ping>()?;
+                Command::Ping(ping).into()
+            },
+            start_byte => {
+                InterpretedCommand::Unknown { start_byte }
+            },
+        };
+
+        Ok(interpreted_command)
+    }
+}
+
 impl From<Command> for InterpretedCommand {
     fn from(command: Command) -> Self {
         InterpretedCommand::Known { command }
@@ -217,16 +298,8 @@ fn read_command_via_tcp_and_respond(stream: &mut Stream) -> io::Result<()> {
         ref output_processor,
     } = *stream;
 
-    // Receive bytes from the TCP stream.
-    let len = tcp_stream.read(bytes)?;
-
-    // Empty messages should be skipped.
-    if bytes.is_empty() || len == 0 {
-        return Err(io::Error::new(io::ErrorKind::InvalidData, "read `0` bytes from tcp stream"));
-    }
-
-    // Attempt to interpret the bytes as a command.
-    let interpreted_command = interpret_command(&bytes[..len])?;
+    // Read the command from the TCP stream.
+    let interpreted_command = InterpretedCommand::read_from_tcp_stream(bytes, tcp_stream)?;
 
     // Process command here.
     let dac_response = process_interpreted_command(dac, interpreted_command, output_processor);
@@ -414,22 +487,3 @@ pub fn process_command(
         dac_status,
     }
 }
-
-// /// Spawn a stream that receives **Command**s sent by the user via the given TCP stream, processes
-// /// them, updates the DAC state accordingly and responds via the TCP stream.
-// ///
-// /// Returns a **Handle** to the two stream threads: "tcp-handler" and "command-processor".
-// pub fn spawn(dac: dac::Addressed, tcp_stream: net::TcpStream) -> io::Result<Handle> {
-//     // Spawn the tcp handling thread.
-//     let buffer_capacity = dac.buffer_capacity as usize;
-//     let tcp_handler_thread = thread::Builder::new()
-//         .name("ether-dream-dac-emulator-stream".into())
-//         .spawn(move || {
-//             run(dac, tcp_stream, buffer_capacity)
-//         })?;
-// 
-//     // Create the handle to the streams.
-//     let handle = Handle { stream_thread };
-// 
-//     Ok(handle)
-// }

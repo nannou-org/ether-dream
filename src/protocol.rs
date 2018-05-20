@@ -562,7 +562,7 @@ pub mod command {
         }
     }
 
-    impl Data<'static> {
+    impl<'a> Data<'a> {
         /// Read the `u16` representing the number of points within the **Data** from the given
         /// `reader`.
         ///
@@ -600,7 +600,9 @@ pub mod command {
             }
             Ok(())
         }
+    }
 
+    impl Data<'static> {
         /// Consecutively read the fields of the **Data** type and return a **Data** instance.
         ///
         /// Note that if reading from a stream, this method assumes that the starting command byte

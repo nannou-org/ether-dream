@@ -1,7 +1,6 @@
 extern crate ether_dream;
 
 use ether_dream::dac;
-use std::{time, thread};
 
 fn main() {
     println!("Listening for an Ether Dream DAC...");
@@ -19,18 +18,14 @@ fn main() {
     let mut stream = dac::stream::connect(&dac_broadcast, source_addr.ip().clone()).unwrap();
 
     // If we want to create an animation (in our case a moving sine wave) we need a frame rate.
-    let frame_hz = 60.0;
-    // Lets use the DAC at half the maximum scan rate.
-    let point_hz = stream.dac().max_point_rate / 8;
+    let frames_per_second = 60.0;
+    // Lets use the DAC at an eighth the maximum scan rate.
+    let points_per_second = stream.dac().max_point_rate / 32;
     // Determine the number of points per frame given our target frame and point rates.
-    let points_per_frame = (point_hz as f32 / frame_hz) as u16;
-    // Work out the loop interval in milliseconds.
-    let loop_interval_ms = time::Duration::from_millis((1_000.0 / frame_hz) as _);
-    // Track the time that we started generating points to use as the phase for a sine wave.
-    let start = time::Instant::now();
+    let points_per_frame = (points_per_second as f32 / frames_per_second) as u16;
 
-    println!("Preparing for playback:\n\tframe_hz: {}\n\tpoint_hz: {}\n\tpoints_per_frame: {}\n...",
-             frame_hz, point_hz, points_per_frame);
+    println!("Preparing for playback:\n\tframe_hz: {}\n\tpoint_hz: {}\n\tpoints_per_frame: {}\n",
+             frames_per_second, points_per_second, points_per_frame);
 
     // Prepare the DAC's playback engine and await the repsonse.
     stream
@@ -41,22 +36,27 @@ fn main() {
 
     println!("Beginning playback!");
 
+    // The sine wave used to generate points.
+    let mut sine_wave = SineWave { point: 0, points_per_frame, frames_per_second };
+
     // Queue the initial frame and tell the DAC to begin producing output.
+    let n_points = points_to_generate(stream.dac());;
     stream
         .queue_commands()
-        .data(sine_wave_frame_dac_points(start, points_per_frame))
-        .begin(0, point_hz)
+        .data(sine_wave.by_ref().take(n_points))
+        .begin(0, points_per_second)
         .submit()
         .unwrap();
 
     // Loop and continue to send points forever.
     loop {
+        // Determine how many points the DAC can currently receive.
+        let n_points = points_to_generate(stream.dac());;
         stream
             .queue_commands()
-            .data(sine_wave_frame_dac_points(start, points_per_frame))
+            .data(sine_wave.by_ref().take(n_points))
             .submit()
             .unwrap();
-        thread::sleep(loop_interval_ms);
     }
 
     // Tell the DAC to stop producing output and return to idle. Wait for the response.
@@ -70,60 +70,40 @@ fn main() {
         .unwrap();
 }
 
-// Create a sine wave of white DAC points spanning the entire x and y ranges of the projector.
+// Determine the number of points needed to fill the DAC.
+fn points_to_generate(dac: &ether_dream::dac::Dac) -> usize {
+    dac.buffer_capacity as usize - 1 - dac.status.buffer_fullness as usize
+}
+
+// An iterator that endlessly generates a sine wave of DAC points.
 //
-// The phase of the sine wave is based on the duration since the given `start` instant.
-//
-// The number of points generated will be equal to the given `points_per_frame`.
-fn sine_wave_frame_dac_points(
-    start: time::Instant,
+// The sine wave oscillates at a rate of once per second.
+struct SineWave {
+    point: u32,
     points_per_frame: u16,
-) -> Vec<ether_dream::protocol::DacPoint>
-{
-    let duration = start.elapsed();
-    let phase = duration.as_secs() as f32 + duration.subsec_nanos() as f32 * 1e-9;
+    frames_per_second: f32,
+}
 
-    // Get the amplitude of the sine wav given some fraction across the x axis.
-    let amp = |x_fract: f32| ((x_fract + phase) * 2.0 * std::f32::consts::PI).sin();
-
-    // Create a point for the given index within `points_per_frame` with the given rgb colour.
-    let point_at_i = |i, r, g, b| -> ether_dream::protocol::DacPoint {
-        let i_fract = i as f32 / points_per_frame as f32;
-        let x = (std::i16::MIN as f32 + i_fract * (std::i16::MAX as f32 - std::i16::MIN as f32)) as i16;
-        //let x = (i as i32 + std::i16::MIN as i32) as i16;
-        let y = (amp(i_fract) * std::i16::MAX as f32) as i16;
-        ether_dream::protocol::DacPoint {
-            control: 0,
-            x,
-            y,
-            i,
-            r,
-            g,
-            b,
-            u1: 0,
-            u2: 0,
-        }
-    };
-
-    // A vec for collecting points.
-    //
-    // Note that it will normally be more efficient to re-use a buffer or to use an iterator,
-    // however this example produces a new `Vec` each frame for simplicity.
-    let mut dac_points = Vec::with_capacity(points_per_frame as _);
-
-    // Make the first point invisible so that the laser does not create a line from where it
-    // previously ended.
-    let (i, r, g, b) = (0, 0, 0, 0);
-    let dac_point = point_at_i(i, r, g, b);
-    dac_points.push(dac_point);
-
-    // Draw the rest of the points white to create a white sine wave.
-    for i in 1..points_per_frame {
-        let channel_max = std::u16::MAX;
-        let (r, g, b) = (channel_max, channel_max, channel_max);
-        let dac_point = point_at_i(i, r, g, b);
-        dac_points.push(dac_point);
+impl Iterator for SineWave {
+    type Item = ether_dream::protocol::DacPoint;
+    fn next(&mut self) -> Option<Self::Item> {
+        let coloured_points_per_frame = self.points_per_frame - 1;
+        let i = (self.point % self.points_per_frame as u32) as u16;
+        let fract = i as f32 / coloured_points_per_frame as f32;
+        let phase = (self.point as f32 / coloured_points_per_frame as f32) / self.frames_per_second;
+        let amp = ((fract + phase) * 2.0 * std::f32::consts::PI).sin();
+        let (r, g, b) = match i == coloured_points_per_frame {
+            true => (0, 0, 0), // Draw the last point black to avoid tracing back to start.
+            false => (std::u16::MAX, std::u16::MAX, std::u16::MAX),
+        };
+        let x_min = std::i16::MIN;
+        let x_max = std::i16::MAX;
+        let x = (x_min as f32 + fract * (x_max as f32 - x_min as f32)) as i16;
+        let y = (amp * x_max as f32) as i16;
+        let control = 0;
+        let (u1, u2) = (0, 0);
+        let p = ether_dream::protocol::DacPoint { control, x, y, i, r, g, b, u1, u2 };
+        self.point += 1;
+        Some(p)
     }
-
-    dac_points
 }

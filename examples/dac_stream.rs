@@ -32,7 +32,11 @@ fn main() {
         .queue_commands()
         .prepare_stream()
         .submit()
-        .unwrap();
+        .err()
+        .map(|err| {
+            eprintln!("err occurred when submitting PREPARE_STREAM \
+                      command and listening for response: {}", err);
+        });
 
     println!("Beginning playback!");
 
@@ -46,17 +50,25 @@ fn main() {
         .data(sine_wave.by_ref().take(n_points))
         .begin(0, points_per_second)
         .submit()
-        .unwrap();
+        .err()
+        .map(|err| {
+            eprintln!("err occurred when submitting initial DATA and BEGIN \
+                      commands and listening for response: {}", err);
+        });
 
     // Loop and continue to send points forever.
     loop {
         // Determine how many points the DAC can currently receive.
         let n_points = points_to_generate(stream.dac());;
-        stream
+        if let Err(err) = stream
             .queue_commands()
             .data(sine_wave.by_ref().take(n_points))
             .submit()
-            .unwrap();
+        {
+            eprintln!("err occurred when submitting DATA command and listening \
+                      for response: {}", err);
+            break;
+        }
     }
 
     // Tell the DAC to stop producing output and return to idle. Wait for the response.
@@ -67,7 +79,7 @@ fn main() {
         .queue_commands()
         .stop()
         .submit()
-        .unwrap();
+        .expect("err occurred when submitting STOP command and listening for response");
 }
 
 // Determine the number of points needed to fill the DAC.
@@ -89,12 +101,13 @@ impl Iterator for SineWave {
     fn next(&mut self) -> Option<Self::Item> {
         let coloured_points_per_frame = self.points_per_frame - 1;
         let i = (self.point % self.points_per_frame as u32) as u16;
+        let hz = 1.0;
         let fract = i as f32 / coloured_points_per_frame as f32;
         let phase = (self.point as f32 / coloured_points_per_frame as f32) / self.frames_per_second;
-        let amp = ((fract + phase) * 2.0 * std::f32::consts::PI).sin();
-        let (r, g, b) = match i == coloured_points_per_frame {
-            true => (0, 0, 0), // Draw the last point black to avoid tracing back to start.
-            false => (std::u16::MAX, std::u16::MAX, std::u16::MAX),
+        let amp = (hz * (fract + phase) * 2.0 * std::f32::consts::PI).sin();
+        let (r, g, b) = match i {
+            i if i == coloured_points_per_frame || i < 13 => (0, 0, 0),
+            _ => (std::u16::MAX, std::u16::MAX, std::u16::MAX),
         };
         let x_min = std::i16::MIN;
         let x_max = std::i16::MAX;

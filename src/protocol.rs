@@ -163,13 +163,13 @@ pub struct DacPoint {
     /// -32768 is the start along the *y* axis (bottom-most point).
     /// 32767 is the end along the *y* axis (top-most point).
     pub y: i16,
-    pub i: u16,
     /// `0` is no red. `65535` is full red.
     pub r: u16,
     /// `0` is no green. `65535` is full green.
     pub g: u16,
     /// `0` is no blue. `65535` is full blue.
     pub b: u16,
+    pub i: u16,
     pub u1: u16,
     pub u2: u16,
 }
@@ -271,10 +271,10 @@ impl WriteToBytes for DacPoint {
         writer.write_u16::<LE>(self.control)?;
         writer.write_i16::<LE>(self.x)?;
         writer.write_i16::<LE>(self.y)?;
-        writer.write_u16::<LE>(self.i)?;
         writer.write_u16::<LE>(self.r)?;
         writer.write_u16::<LE>(self.g)?;
         writer.write_u16::<LE>(self.b)?;
+        writer.write_u16::<LE>(self.i)?;
         writer.write_u16::<LE>(self.u1)?;
         writer.write_u16::<LE>(self.u2)?;
         Ok(())
@@ -350,10 +350,10 @@ impl ReadFromBytes for DacPoint {
         let control = reader.read_u16::<LE>()?;
         let x = reader.read_i16::<LE>()?;
         let y = reader.read_i16::<LE>()?;
-        let i = reader.read_u16::<LE>()?;
         let r = reader.read_u16::<LE>()?;
         let g = reader.read_u16::<LE>()?;
         let b = reader.read_u16::<LE>()?;
+        let i = reader.read_u16::<LE>()?;
         let u1 = reader.read_u16::<LE>()?;
         let u2 = reader.read_u16::<LE>()?;
         let dac_point = DacPoint {

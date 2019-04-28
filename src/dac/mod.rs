@@ -210,8 +210,6 @@ pub enum ProtocolError {
     UnknownLightEngineState,
     UnknownPlaybackState,
     UnknownDataSource,
-    UnknownLightEngineFlags,
-    UnknownPlaybackFlags,
 }
 
 impl Addressed {
@@ -256,10 +254,8 @@ impl Status {
             .ok_or(ProtocolError::UnknownPlaybackState)?;
         let data_source = DataSource::from_protocol(status.source, status.source_flags)
             .ok_or(ProtocolError::UnknownDataSource)?;
-        let light_engine_flags = LightEngineFlags::from_bits(status.light_engine_flags)
-            .ok_or(ProtocolError::UnknownLightEngineFlags)?;
-        let playback_flags = PlaybackFlags::from_bits(status.playback_flags)
-            .ok_or(ProtocolError::UnknownPlaybackFlags)?;
+        let light_engine_flags = LightEngineFlags::from_bits_truncate(status.light_engine_flags);
+        let playback_flags = PlaybackFlags::from_bits_truncate(status.playback_flags);
         let buffer_fullness = status.buffer_fullness;
         let point_rate = status.point_rate;
         let point_count = status.point_count;
@@ -285,10 +281,8 @@ impl Status {
             .ok_or(ProtocolError::UnknownPlaybackState)?;
         self.data_source = DataSource::from_protocol(status.source, status.source_flags)
             .ok_or(ProtocolError::UnknownDataSource)?;
-        self.light_engine_flags = LightEngineFlags::from_bits(status.light_engine_flags)
-            .ok_or(ProtocolError::UnknownLightEngineFlags)?;
-        self.playback_flags = PlaybackFlags::from_bits(status.playback_flags)
-            .ok_or(ProtocolError::UnknownPlaybackFlags)?;
+        self.light_engine_flags = LightEngineFlags::from_bits_truncate(status.light_engine_flags);
+        self.playback_flags = PlaybackFlags::from_bits_truncate(status.playback_flags);
         self.buffer_fullness = status.buffer_fullness;
         self.point_rate = status.point_rate;
         self.point_count = status.point_count;
@@ -381,11 +375,11 @@ impl DataSource {
                 Some(DataSource::NetworkStreaming)
             },
             protocol::DacStatus::SOURCE_ILDA_PLAYBACK_SD => {
-                IldaPlaybackFlags::from_bits(flags)
+                Some(IldaPlaybackFlags::from_bits_truncate(flags))
                     .map(DataSource::IldaPlayback)
             },
             protocol::DacStatus::SOURCE_INTERNAL_ABSTRACT_GENERATOR => {
-                InternalAbstractGeneratorFlags::from_bits(flags)
+                Some(InternalAbstractGeneratorFlags::from_bits_truncate(flags))
                     .map(DataSource::InternalAbstractGenerator)
             },
             _ => None,
@@ -552,8 +546,6 @@ impl Error for ProtocolError {
             ProtocolError::UnknownLightEngineState => "unknown light engine state",
             ProtocolError::UnknownPlaybackState => "unknown playback state",
             ProtocolError::UnknownDataSource => "unknown data source",
-            ProtocolError::UnknownLightEngineFlags => "unknown light engine flags",
-            ProtocolError::UnknownPlaybackFlags => "unknown playback flags",
         }
     }
 }

@@ -158,6 +158,10 @@ bitflags! {
         ///
         /// This is reset to zero by the `Prepare` command.
         const EMERGENCY_STOP = 0b00000100;
+        /// Undocumented bit set sent by an Ether Dream DAC during broadcast with hw_version `10`.
+        ///
+        /// Doesn't seem to impact playback. First three bits still seem valid.
+        const UNKNOWN_HW10 = 0b1101000000010000;
     }
 }
 

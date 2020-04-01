@@ -1,10 +1,10 @@
+use crate::stream::{self, Stream};
 use crossbeam::sync::MsQueue;
 use ether_dream::dac;
 use ether_dream::protocol::{self, Command, SizeBytes, WriteBytes};
 use std::{net, time};
 use std::io::{self, Write};
 use std::sync::Arc;
-use stream::{self, Stream};
 
 /// Listens for and handles requests to connect with the DAC.
 pub struct Listener {

@@ -1,5 +1,5 @@
-use dac;
-use protocol::{self, Command, ReadBytes, SizeBytes, WriteBytes, WriteToBytes};
+use crate::dac;
+use crate::protocol::{self, Command, ReadBytes, SizeBytes, WriteBytes, WriteToBytes};
 use std::borrow::Cow;
 use std::error::Error;
 use std::{self, fmt, mem, net, ops, time};
@@ -12,7 +12,7 @@ pub struct Stream {
     /// The TCP stream used for communicating with the DAC.
     tcp_stream: net::TcpStream,
     /// The timeout duration that should be applied when attempting to read from the TCP stream.
-    timeout: Option<time::Duration>,
+    _timeout: Option<time::Duration>,
     /// A buffer to re-use for queueing commands via the `queue_commands` method.
     command_buffer: Vec<QueuedCommand>,
     /// A buffer to re-use for queueing points for `Data` commands.
@@ -209,7 +209,7 @@ impl<'a> CommandQueue<'a> {
     /// played (see the `WriteData` command).
     ///
     /// If the DAC's playback state is not `Prepared` or `Playing`, it replies with NAK - Invalid.
-    /// 
+    ///
     /// If the point rate buffer is full, it replies with NAK - Full.
     ///
     /// Otherwise, it replies with ACK.
@@ -386,15 +386,7 @@ impl Nak {
 }
 
 impl Error for CommunicationError {
-    fn description(&self) -> &str {
-        match *self {
-            CommunicationError::Io(ref err) => err.description(),
-            CommunicationError::Protocol(ref err) => err.description(),
-            CommunicationError::Response(ref err) => err.description(),
-        }
-    }
-
-    fn cause(&self) -> Option<&Error> {
+    fn cause(&self) -> Option<&dyn Error> {
         match *self {
             CommunicationError::Io(ref err) => Some(err as _),
             CommunicationError::Protocol(ref err) => Some(err as _),
@@ -403,9 +395,21 @@ impl Error for CommunicationError {
     }
 }
 
-impl Error for ResponseError {
-    fn description(&self) -> &str {
-        match self.kind {
+impl Error for ResponseError {}
+
+impl fmt::Display for CommunicationError {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        match *self {
+            CommunicationError::Io(ref err) => err.fmt(f),
+            CommunicationError::Protocol(ref err) => err.fmt(f),
+            CommunicationError::Response(ref err) => err.fmt(f),
+        }
+    }
+}
+
+impl fmt::Display for ResponseError {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        let s = match self.kind {
             ResponseErrorKind::UnexpectedCommand(_) => {
                 "the received response was to an unexpected command"
             },
@@ -414,19 +418,8 @@ impl Error for ResponseError {
                 Nak::Invalid => "DAC responded with \"NAK - Invalid\"",
                 Nak::StopCondition => "DAC responded with \"NAK - Stop Condition\"",
             },
-        }
-    }
-}
-
-impl fmt::Display for CommunicationError {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        write!(f, "{}", self.description())
-    }
-}
-
-impl fmt::Display for ResponseError {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        write!(f, "{}", self.description())
+        };
+        write!(f, "{}", s)
     }
 }
 
@@ -486,7 +479,7 @@ pub fn connect(
     let stream = Stream {
         dac,
         tcp_stream,
-        timeout: None,
+        _timeout: None,
         command_buffer: vec![],
         point_buffer: vec![],
         bytes,

@@ -3,7 +3,9 @@
 mod output;
 
 use ether_dream::dac;
-use ether_dream::protocol::{self, command, Command as CommandTrait, ReadBytes, SizeBytes, WriteBytes};
+use ether_dream::protocol::{
+    self, command, Command as CommandTrait, ReadBytes, SizeBytes, WriteBytes,
+};
 use std::io::{self, Read, Write};
 use std::{net, thread};
 
@@ -50,7 +52,7 @@ pub enum InterpretedCommand {
     /// A successfuly interpreted, known command.
     Known { command: Command },
     /// Received an unknown command that started with the given byte.
-    Unknown { start_byte: u8 }
+    Unknown { start_byte: u8 },
 }
 
 impl Handle {
@@ -64,7 +66,7 @@ impl Handle {
 
     /// Wait for the DAC to finish communicating with the stream and return its resulting state.
     pub fn wait(self) -> (dac::Addressed, io::Error) {
-        let Handle { stream_thread, ..  } = self;
+        let Handle { stream_thread, .. } = self;
         let result = stream_thread.join().expect("failed to join stream thread");
         result
     }
@@ -128,8 +130,7 @@ impl Stream {
         dac: dac::Addressed,
         tcp_stream: net::TcpStream,
         output_frame_rate: u32,
-    ) -> io::Result<Self>
-    {
+    ) -> io::Result<Self> {
         // Create and spawn the output processor on its own thread.
         let output_processor = output::Processor::new(output_frame_rate).spawn()?;
 
@@ -140,10 +141,10 @@ impl Stream {
         let bytes: Box<[u8]> = {
             let data_command_size_bytes = 1;
             let data_len_size_bytes = 2;
-            let max_points_size_bytes = dac.buffer_capacity as usize * protocol::DacPoint::SIZE_BYTES;
-            let max_command_size = data_command_size_bytes
-                + data_len_size_bytes
-                + max_points_size_bytes;
+            let max_points_size_bytes =
+                dac.buffer_capacity as usize * protocol::DacPoint::SIZE_BYTES;
+            let max_command_size =
+                data_command_size_bytes + data_len_size_bytes + max_points_size_bytes;
             vec![0u8; max_command_size].into()
         };
 
@@ -191,11 +192,19 @@ impl Stream {
             .name("ether-dream-dac-emulator-stream".into())
             .spawn(move || {
                 let io_err = self.run();
-                let Stream { dac, output_processor, .. } = self;
+                let Stream {
+                    dac,
+                    output_processor,
+                    ..
+                } = self;
                 output_processor.close();
                 (dac, io_err)
             })?;
-        let handle = Handle { stream_thread, tcp_stream, output };
+        let handle = Handle {
+            stream_thread,
+            tcp_stream,
+            output,
+        };
         Ok(handle)
     }
 }
@@ -208,15 +217,17 @@ impl InterpretedCommand {
     pub fn read_from_tcp_stream(
         bytes: &mut [u8],
         tcp_stream: &mut net::TcpStream,
-    ) -> io::Result<Self>
-    {
+    ) -> io::Result<Self> {
         // Peek the first byte to determine the command kind.
         bytes[0] = 0u8;
         let len = tcp_stream.peek(&mut bytes[..1])?;
 
         // Empty messages should only happen if the stream has closed.
         if len == 0 {
-            return Err(io::Error::new(io::ErrorKind::InvalidData, "read `0` bytes from tcp stream"));
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidData,
+                "read `0` bytes from tcp stream",
+            ));
         }
 
         // Read the rest of the command from the stream based on the starting byte.
@@ -225,17 +236,17 @@ impl InterpretedCommand {
                 tcp_stream.read_exact(&mut bytes[..command::PrepareStream::SIZE_BYTES])?;
                 let prepare_stream = (&bytes[..]).read_bytes::<command::PrepareStream>()?;
                 Command::PrepareStream(prepare_stream).into()
-            },
+            }
             command::Begin::START_BYTE => {
                 tcp_stream.read_exact(&mut bytes[..command::Begin::SIZE_BYTES])?;
                 let begin = (&bytes[..]).read_bytes::<command::Begin>()?;
                 Command::Begin(begin).into()
-            },
+            }
             command::PointRate::START_BYTE => {
                 tcp_stream.read_exact(&mut bytes[..command::PointRate::SIZE_BYTES])?;
                 let point_rate = (&bytes[..]).read_bytes::<command::PointRate>()?;
                 Command::PointRate(point_rate).into()
-            },
+            }
             command::Data::START_BYTE => {
                 // Read the number of points.
                 let command_bytes = 1;
@@ -251,30 +262,29 @@ impl InterpretedCommand {
                 tcp_stream.read_exact(&mut bytes[..total_bytes])?;
                 let data = (&bytes[..]).read_bytes::<command::Data<'static>>()?;
                 Command::Data(data).into()
-            },
+            }
             command::Stop::START_BYTE => {
                 tcp_stream.read_exact(&mut bytes[..command::Stop::SIZE_BYTES])?;
                 let stop = (&bytes[..]).read_bytes::<command::Stop>()?;
                 Command::Stop(stop).into()
-            },
+            }
             command::EmergencyStop::START_BYTE => {
                 tcp_stream.read_exact(&mut bytes[..command::EmergencyStop::SIZE_BYTES])?;
                 let emergency_stop = (&bytes[..]).read_bytes::<command::EmergencyStop>()?;
                 Command::EmergencyStop(emergency_stop).into()
-            },
+            }
             command::ClearEmergencyStop::START_BYTE => {
                 tcp_stream.read_exact(&mut bytes[..command::ClearEmergencyStop::SIZE_BYTES])?;
-                let clear_emergency_stop = (&bytes[..]).read_bytes::<command::ClearEmergencyStop>()?;
+                let clear_emergency_stop =
+                    (&bytes[..]).read_bytes::<command::ClearEmergencyStop>()?;
                 Command::ClearEmergencyStop(clear_emergency_stop).into()
-            },
+            }
             command::Ping::START_BYTE => {
                 tcp_stream.read_exact(&mut bytes[..command::Ping::SIZE_BYTES])?;
                 let ping = (&bytes[..]).read_bytes::<command::Ping>()?;
                 Command::Ping(ping).into()
-            },
-            start_byte => {
-                InterpretedCommand::Unknown { start_byte }
-            },
+            }
+            start_byte => InterpretedCommand::Unknown { start_byte },
         };
 
         Ok(interpreted_command)
@@ -317,14 +327,11 @@ pub fn process_interpreted_command(
     dac: &mut dac::Addressed,
     interpreted_command: InterpretedCommand,
     output_processor: &output::Handle,
-) -> protocol::DacResponse
-{
+) -> protocol::DacResponse {
     // Handle the interpreted command and create a response.
     match interpreted_command {
         // If the command was known, process it and update the DAC state.
-        InterpretedCommand::Known { command } => {
-            process_command(dac, command, output_processor)
-        },
+        InterpretedCommand::Known { command } => process_command(dac, command, output_processor),
         // If the command was unknown, reply with a NAK - Invalid.
         InterpretedCommand::Unknown { start_byte } => {
             let dac_status = dac.status.to_protocol();
@@ -356,15 +363,13 @@ pub fn process_command(
                     dac.status.point_count = 0;
                     dac.status.buffer_fullness = 0;
                     protocol::DacResponse::ACK
-                },
+                }
                 // Otherwise, reply with NAK - Invalid.
-                _unexpected_state => {
-                    protocol::DacResponse::NAK_INVALID
-                },
+                _unexpected_state => protocol::DacResponse::NAK_INVALID,
             };
             let command = command::PrepareStream::START_BYTE;
             (response, command)
-        },
+        }
 
         // Start processing the points at the specified rate.
         Command::Begin(begin) => {
@@ -378,37 +383,33 @@ pub fn process_command(
                     } else {
                         protocol::DacResponse::NAK_INVALID
                     }
-                },
-                _unexpected_state => {
-                    protocol::DacResponse::NAK_INVALID
-                },
+                }
+                _unexpected_state => protocol::DacResponse::NAK_INVALID,
             };
             let command = command::Begin::START_BYTE;
             (response, command)
-        },
+        }
 
         // Enqueue the new point rate.
         Command::PointRate(point_rate) => {
             let response = match (dac.status.light_engine, dac.status.playback) {
-                (dac::LightEngine::Ready, dac::Playback::Prepared) |
-                (dac::LightEngine::Ready, dac::Playback::Playing) => {
+                (dac::LightEngine::Ready, dac::Playback::Prepared)
+                | (dac::LightEngine::Ready, dac::Playback::Playing) => {
                     output_processor.push_point_rate(point_rate);
                     // TODO: If point rate buffer is full, respond with NAK - FULL.
                     protocol::DacResponse::ACK
-                },
-                _unexpected_state => {
-                    protocol::DacResponse::NAK_INVALID
-                },
+                }
+                _unexpected_state => protocol::DacResponse::NAK_INVALID,
             };
             let command = command::PointRate::START_BYTE;
             (response, command)
-        },
+        }
 
         // Received new point data for processing.
         Command::Data(command::Data { points }) => {
             let response = match (dac.status.light_engine, dac.status.playback) {
-                (dac::LightEngine::Ready, dac::Playback::Prepared) |
-                (dac::LightEngine::Ready, dac::Playback::Playing) => {
+                (dac::LightEngine::Ready, dac::Playback::Prepared)
+                | (dac::LightEngine::Ready, dac::Playback::Playing) => {
                     let mut points = points.into_owned();
                     let current_len = output_processor.buffer_fullness();
                     let new_len = current_len + points.len();
@@ -421,31 +422,27 @@ pub fn process_command(
                     dac.status.buffer_fullness = output_processor.push_data(points) as _;
                     dac.status.point_count = output_processor.point_count() as _;
                     response
-                },
-                _unexpected_state => {
-                    protocol::DacResponse::NAK_INVALID
-                },
+                }
+                _unexpected_state => protocol::DacResponse::NAK_INVALID,
             };
             let command = command::Data::START_BYTE;
             (response, command)
-        },
+        }
 
         // Stop processing points.
         Command::Stop(_stop) => {
             let response = match (dac.status.light_engine, dac.status.playback) {
-                (dac::LightEngine::Ready, dac::Playback::Prepared) |
-                (dac::LightEngine::Ready, dac::Playback::Playing) => {
+                (dac::LightEngine::Ready, dac::Playback::Prepared)
+                | (dac::LightEngine::Ready, dac::Playback::Playing) => {
                     output_processor.stop();
                     dac.status.playback = dac::Playback::Idle;
                     protocol::DacResponse::ACK
-                },
-                _unexpected_state => {
-                    protocol::DacResponse::NAK_INVALID
-                },
+                }
+                _unexpected_state => protocol::DacResponse::NAK_INVALID,
             };
             let command = command::Stop::START_BYTE;
             (response, command)
-        },
+        }
 
         // Immediately stop processing points and switch the LightEngine to ESTOP state.
         Command::EmergencyStop(_e_stop) => {
@@ -455,7 +452,7 @@ pub fn process_command(
             let response = protocol::DacResponse::ACK;
             let command = command::EmergencyStop::START_BYTE;
             (response, command)
-        },
+        }
 
         // Reset the light engine emergency stop to ready state.
         Command::ClearEmergencyStop(_e_stop) => {
@@ -464,21 +461,19 @@ pub fn process_command(
                 dac::LightEngine::Ready => {
                     dac.status.light_engine = dac::LightEngine::Ready;
                     protocol::DacResponse::ACK
-                },
-                _unexpected_state => {
-                    protocol::DacResponse::NAK_INVALID
-                },
+                }
+                _unexpected_state => protocol::DacResponse::NAK_INVALID,
             };
             let command = command::ClearEmergencyStop::START_BYTE;
             (response, command)
-        },
+        }
 
         // Always respond to pings with ACK packets.
         Command::Ping(_ping) => {
             let response = protocol::DacResponse::ACK;
             let command = command::Ping::START_BYTE;
             (response, command)
-        },
+        }
     };
     let dac_status = dac.status.to_protocol();
     protocol::DacResponse {

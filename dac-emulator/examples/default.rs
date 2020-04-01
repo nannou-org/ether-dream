@@ -2,7 +2,10 @@ extern crate ether_dream_dac_emulator;
 
 fn main() {
     let dac_description = Default::default();
-    println!("Creating an emulator for the following Ether Dream DAC:\n{:#?}", dac_description);
+    println!(
+        "Creating an emulator for the following Ether Dream DAC:\n{:#?}",
+        dac_description
+    );
     let (broadcaster, mut listener) = ether_dream_dac_emulator::new(dac_description).unwrap();
     println!("Broadcasting DAC once per second...");
     let broadcaster_handle = broadcaster.spawn().unwrap();

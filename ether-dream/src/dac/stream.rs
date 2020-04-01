@@ -2,8 +2,8 @@ use crate::dac;
 use crate::protocol::{self, Command, ReadBytes, SizeBytes, WriteBytes, WriteToBytes};
 use std::borrow::Cow;
 use std::error::Error;
-use std::{self, fmt, mem, net, ops, time};
 use std::io::{self, Read, Write};
+use std::{self, fmt, mem, net, ops, time};
 
 /// A bi-directional communication stream between the user and a `Dac`.
 pub struct Stream {
@@ -82,12 +82,21 @@ impl Stream {
     where
         C: Command + WriteToBytes,
     {
-        let Stream { ref mut bytes, ref mut tcp_stream, .. } = *self;
+        let Stream {
+            ref mut bytes,
+            ref mut tcp_stream,
+            ..
+        } = *self;
         send_command(bytes, tcp_stream, command)
     }
 
     fn recv_response(&mut self, expected_command: u8) -> Result<(), CommunicationError> {
-        let Stream { ref mut bytes, ref mut tcp_stream, ref mut dac, ..  } = *self;
+        let Stream {
+            ref mut bytes,
+            ref mut tcp_stream,
+            ref mut dac,
+            ..
+        } = *self;
         recv_response(bytes, tcp_stream, dac, expected_command)
     }
 
@@ -163,8 +172,7 @@ fn recv_response(
     tcp_stream: &mut net::TcpStream,
     dac: &mut dac::Addressed,
     expected_command: u8,
-) -> Result<(), CommunicationError>
-{
+) -> Result<(), CommunicationError> {
     // Read the response.
     bytes.resize(protocol::DacResponse::SIZE_BYTES, 0);
     tcp_stream.read_exact(bytes)?;
@@ -182,7 +190,9 @@ impl<'a> CommandQueue<'a> {
     /// This command may only be sent if the light engine is `Ready` and the playback system is
     /// `Idle`. If so, the DAC replies with ACK. Otherwise, it replies with NAK - Invalid.
     pub fn prepare_stream(self) -> Self {
-        self.stream.command_buffer.push(QueuedCommand::PrepareStream);
+        self.stream
+            .command_buffer
+            .push(QueuedCommand::PrepareStream);
         self
     }
 
@@ -198,7 +208,10 @@ impl<'a> CommandQueue<'a> {
     /// `Prepared` and there was data in the buffer, then the DAC will reply with ACK. Otherwise,
     /// it replies with NAK - Invalid.
     pub fn begin(self, low_water_mark: u16, point_rate: u32) -> Self {
-        let begin = protocol::command::Begin { low_water_mark, point_rate };
+        let begin = protocol::command::Begin {
+            low_water_mark,
+            point_rate,
+        };
         self.stream.command_buffer.push(QueuedCommand::Begin(begin));
         self
     }
@@ -215,7 +228,9 @@ impl<'a> CommandQueue<'a> {
     /// Otherwise, it replies with ACK.
     pub fn point_rate(self, point_rate: u32) -> Self {
         let point_rate = protocol::command::PointRate(point_rate);
-        self.stream.command_buffer.push(QueuedCommand::PointRate(point_rate));
+        self.stream
+            .command_buffer
+            .push(QueuedCommand::PointRate(point_rate));
         self
     }
 
@@ -227,8 +242,13 @@ impl<'a> CommandQueue<'a> {
         let start = self.stream.point_buffer.len();
         self.stream.point_buffer.extend(points);
         let end = self.stream.point_buffer.len();
-        assert!(end - start < std::u16::MAX as usize, "the number of points exceeds the `u16` MAX");
-        self.stream.command_buffer.push(QueuedCommand::Data(start..end));
+        assert!(
+            end - start < std::u16::MAX as usize,
+            "the number of points exceeds the `u16` MAX"
+        );
+        self.stream
+            .command_buffer
+            .push(QueuedCommand::Data(start..end));
         self
     }
 
@@ -315,19 +335,19 @@ impl<'a> CommandQueue<'a> {
                 QueuedCommand::Stop => {
                     stream.send_command(protocol::command::Stop)?;
                     command_bytes.push(protocol::command::Stop::START_BYTE);
-                },
+                }
                 QueuedCommand::EmergencyStop => {
                     stream.send_command(protocol::command::EmergencyStop)?;
                     command_bytes.push(protocol::command::EmergencyStop::START_BYTE);
-                },
+                }
                 QueuedCommand::ClearEmergencyStop => {
                     stream.send_command(protocol::command::ClearEmergencyStop)?;
                     command_bytes.push(protocol::command::ClearEmergencyStop::START_BYTE);
-                },
+                }
                 QueuedCommand::Ping => {
                     stream.send_command(protocol::command::Ping)?;
                     command_bytes.push(protocol::command::Ping::START_BYTE);
-                },
+                }
             }
         }
 
@@ -412,7 +432,7 @@ impl fmt::Display for ResponseError {
         let s = match self.kind {
             ResponseErrorKind::UnexpectedCommand(_) => {
                 "the received response was to an unexpected command"
-            },
+            }
             ResponseErrorKind::Nak(ref nak) => match *nak {
                 Nak::Full => "DAC responded with \"NAK - Full\"",
                 Nak::Invalid => "DAC responded with \"NAK - Invalid\"",
@@ -452,8 +472,7 @@ impl From<ResponseError> for CommunicationError {
 pub fn connect(
     broadcast: &protocol::DacBroadcast,
     dac_ip: net::IpAddr,
-) -> Result<Stream, CommunicationError>
-{
+) -> Result<Stream, CommunicationError> {
     // Initialise the DAC state representation.
     let mut dac = dac::Addressed::from_broadcast(broadcast)?;
 

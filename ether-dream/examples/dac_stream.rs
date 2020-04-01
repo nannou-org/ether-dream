@@ -12,7 +12,10 @@ fn main() {
         .unwrap();
     let mac_address = dac::MacAddress(dac_broadcast.mac_address);
 
-    println!("Discovered DAC \"{}\" at \"{}\"! Connecting...", mac_address, source_addr);
+    println!(
+        "Discovered DAC \"{}\" at \"{}\"! Connecting...",
+        mac_address, source_addr
+    );
 
     // Establish the TCP connection.
     let mut stream = dac::stream::connect(&dac_broadcast, source_addr.ip().clone()).unwrap();
@@ -24,8 +27,10 @@ fn main() {
     // Determine the number of points per frame given our target frame and point rates.
     let points_per_frame = (points_per_second as f32 / frames_per_second) as u16;
 
-    println!("Preparing for playback:\n\tframe_hz: {}\n\tpoint_hz: {}\n\tpoints_per_frame: {}\n",
-             frames_per_second, points_per_second, points_per_frame);
+    println!(
+        "Preparing for playback:\n\tframe_hz: {}\n\tpoint_hz: {}\n\tpoints_per_frame: {}\n",
+        frames_per_second, points_per_second, points_per_frame
+    );
 
     // Prepare the DAC's playback engine and await the repsonse.
     stream
@@ -34,14 +39,21 @@ fn main() {
         .submit()
         .err()
         .map(|err| {
-            eprintln!("err occurred when submitting PREPARE_STREAM \
-                      command and listening for response: {}", err);
+            eprintln!(
+                "err occurred when submitting PREPARE_STREAM \
+                      command and listening for response: {}",
+                err
+            );
         });
 
     println!("Beginning playback!");
 
     // The sine wave used to generate points.
-    let mut sine_wave = SineWave { point: 0, points_per_frame, frames_per_second };
+    let mut sine_wave = SineWave {
+        point: 0,
+        points_per_frame,
+        frames_per_second,
+    };
 
     // Queue the initial frame and tell the DAC to begin producing output.
     let n_points = points_to_generate(stream.dac());
@@ -52,8 +64,11 @@ fn main() {
         .submit()
         .err()
         .map(|err| {
-            eprintln!("err occurred when submitting initial DATA and BEGIN \
-                      commands and listening for response: {}", err);
+            eprintln!(
+                "err occurred when submitting initial DATA and BEGIN \
+                      commands and listening for response: {}",
+                err
+            );
         });
 
     // Loop and continue to send points forever.
@@ -65,8 +80,11 @@ fn main() {
             .data(sine_wave.by_ref().take(n_points))
             .submit()
         {
-            eprintln!("err occurred when submitting DATA command and listening \
-                      for response: {}", err);
+            eprintln!(
+                "err occurred when submitting DATA command and listening \
+                      for response: {}",
+                err
+            );
             break;
         }
     }
@@ -115,7 +133,17 @@ impl Iterator for SineWave {
         let y = (amp * x_max as f32) as i16;
         let control = 0;
         let (u1, u2) = (0, 0);
-        let p = ether_dream::protocol::DacPoint { control, x, y, i, r, g, b, u1, u2 };
+        let p = ether_dream::protocol::DacPoint {
+            control,
+            x,
+            y,
+            i,
+            r,
+            g,
+            b,
+            u1,
+            u2,
+        };
         self.point += 1;
         Some(p)
     }

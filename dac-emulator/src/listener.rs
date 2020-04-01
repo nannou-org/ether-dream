@@ -2,9 +2,9 @@ use crate::stream::{self, Stream};
 use crossbeam::sync::MsQueue;
 use ether_dream::dac;
 use ether_dream::protocol::{self, Command, SizeBytes, WriteBytes};
-use std::{net, time};
 use std::io::{self, Write};
 use std::sync::Arc;
+use std::{net, time};
 
 /// Listens for and handles requests to connect with the DAC.
 pub struct Listener {
@@ -46,7 +46,11 @@ impl Listener {
         let addr = net::SocketAddrV4::new([0, 0, 0, 0].into(), protocol::COMMUNICATION_PORT);
         let tcp_listener = net::TcpListener::bind(addr)?;
         let state = Some(State::Waiting(dac));
-        Ok(Listener { state, tcp_listener, output_frame_rate })
+        Ok(Listener {
+            state,
+            tcp_listener,
+            output_frame_rate,
+        })
     }
 
     /// Waits for an incoming TCP connection request and connects.
@@ -91,15 +95,17 @@ impl Listener {
                     self.state = Some(new_state);
 
                     // Create and return the active stream.
-                    let active_stream = ActiveStream { inner: Some((stream, dac_queue)) };
+                    let active_stream = ActiveStream {
+                        inner: Some((stream, dac_queue)),
+                    };
                     return Ok((active_stream, source_addr));
-                },
+                }
                 State::Connected(dac_rx) => {
                     let mut dac = dac_rx.pop();
                     // Reset DAC status.
                     dac.status = dac::Status::from_protocol(&super::initial_status()).unwrap();
                     self.state = Some(State::Waiting(dac));
-                },
+                }
             }
         }
     }
@@ -112,14 +118,18 @@ impl ActiveStream {
     /// **stream::output::Processor** thread. These frames are intended to be useful for debugging
     /// or visualisation.
     pub fn output(&self) -> stream::Output {
-        let (stream, _) = self.inner.as_ref()
+        let (stream, _) = self
+            .inner
+            .as_ref()
             .expect("`output` was called but stream has been closed");
         stream.output()
     }
 
     /// Wait for the stream to be closed by the user and return the reason for shutdown.
     pub fn wait(mut self) -> io::Error {
-        let (stream, dac_queue) = self.inner.take()
+        let (stream, dac_queue) = self
+            .inner
+            .take()
             .expect("`wait` was called but stream has already been closed");
         let (dac, io_err) = stream.wait();
         dac_queue.push(dac);
@@ -128,7 +138,9 @@ impl ActiveStream {
 
     // Shared between the **drop** and **close** methods.
     fn close_inner(&mut self) -> io::Error {
-        let (stream, dac_queue) = self.inner.take()
+        let (stream, dac_queue) = self
+            .inner
+            .take()
             .expect("`close` was called but stream has already been closed");
         let (dac, io_err) = stream.close();
         dac_queue.push(dac);
@@ -157,7 +169,10 @@ impl ActiveStream {
         if let Some((stream_handle, _)) = self.inner.as_ref() {
             stream_handle.set_nodelay(b)
         } else {
-            Err(io::Error::new(io::ErrorKind::InvalidInput, "called `set_nodelay` on a closed stream"))
+            Err(io::Error::new(
+                io::ErrorKind::InvalidInput,
+                "called `set_nodelay` on a closed stream",
+            ))
         }
     }
 
@@ -168,7 +183,10 @@ impl ActiveStream {
         if let Some((stream_handle, _)) = self.inner.as_ref() {
             stream_handle.nodelay()
         } else {
-            Err(io::Error::new(io::ErrorKind::InvalidInput, "called `nodelay` on a closed stream"))
+            Err(io::Error::new(
+                io::ErrorKind::InvalidInput,
+                "called `nodelay` on a closed stream",
+            ))
         }
     }
 
@@ -182,7 +200,10 @@ impl ActiveStream {
         if let Some((stream_handle, _)) = self.inner.as_ref() {
             stream_handle.set_ttl(ttl)
         } else {
-            Err(io::Error::new(io::ErrorKind::InvalidInput, "called `set_ttl` on a closed stream"))
+            Err(io::Error::new(
+                io::ErrorKind::InvalidInput,
+                "called `set_ttl` on a closed stream",
+            ))
         }
     }
 
@@ -193,7 +214,10 @@ impl ActiveStream {
         if let Some((stream_handle, _)) = self.inner.as_ref() {
             stream_handle.ttl()
         } else {
-            Err(io::Error::new(io::ErrorKind::InvalidInput, "called `ttl` on a closed stream"))
+            Err(io::Error::new(
+                io::ErrorKind::InvalidInput,
+                "called `ttl` on a closed stream",
+            ))
         }
     }
 }

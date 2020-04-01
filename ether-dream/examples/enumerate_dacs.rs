@@ -37,8 +37,13 @@ fn main() {
     } else {
         println!("Discovered the following Ether Dream DACs on the network:");
         for (i, (mac, (dac, source_addr))) in dacs.into_iter().enumerate() {
-            println!("{}.\n  MAC address: \"{}\"\n  Network address: \"{}\"\n  {:?}",
-                     i+1, mac, source_addr, dac);
+            println!(
+                "{}.\n  MAC address: \"{}\"\n  Network address: \"{}\"\n  {:?}",
+                i + 1,
+                mac,
+                source_addr,
+                dac
+            );
         }
     }
 }

@@ -1,9 +1,9 @@
 [package]
 name = "ether-dream"
-version = "0.2.2"
+version = "0.2.3"
 authors = ["mitchmindtree <mitchell.nordine@gmail.com>"]
 description = "A full implementation of the Ether Dream Laster DAC protocol."
-readme = "README.md"
+readme = "../README.md"
 keywords = ["laser", "lazer", "protocol", "etherdream", "dac"]
 license = "MIT OR Apache-2.0"
 repository = "https://github.com/nannou-org/ether-dream.git"

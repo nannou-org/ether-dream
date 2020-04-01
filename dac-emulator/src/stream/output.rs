@@ -1,12 +1,12 @@
 use crossbeam::sync::{MsQueue, SegQueue};
-use ether_dream::{dac, protocol};
 use ether_dream::protocol::command;
+use ether_dream::{dac, protocol};
 use std::collections::VecDeque;
-use std::{fmt, mem, ops, time, thread};
 use std::error::Error;
 use std::io;
-use std::sync::Arc;
 use std::sync::atomic::{self, AtomicUsize};
+use std::sync::Arc;
+use std::{fmt, mem, ops, thread, time};
 
 // A message queue for allowingn the **Stream** to communicate with its **output::Processor**.
 type MessageQueue = MsQueue<Message>;
@@ -88,7 +88,10 @@ impl Output {
             None => Ok(None),
             Some(OutputMessage::Data(points)) => {
                 let used_buffer_queue = self.used_buffer_queue.clone();
-                Ok(Some(Frame { points, used_buffer_queue }))
+                Ok(Some(Frame {
+                    points,
+                    used_buffer_queue,
+                }))
             }
             Some(OutputMessage::Close) => Err(StreamClosed),
         }
@@ -106,7 +109,10 @@ impl Output {
         match self.message_queue.pop() {
             OutputMessage::Data(points) => {
                 let used_buffer_queue = self.used_buffer_queue.clone();
-                Ok(Frame { points, used_buffer_queue })
+                Ok(Frame {
+                    points,
+                    used_buffer_queue,
+                })
             }
             OutputMessage::Close => Err(StreamClosed),
         }
@@ -146,7 +152,10 @@ impl Handle {
     /// Returns the resulting number of points in the buffer.
     pub fn push_data(&self, data: Vec<protocol::DacPoint>) -> usize {
         let data_len = data.len();
-        let prev_len = self.shared.buffer_fullness.fetch_add(data_len, atomic::Ordering::Relaxed);
+        let prev_len = self
+            .shared
+            .buffer_fullness
+            .fetch_add(data_len, atomic::Ordering::Relaxed);
         self.shared.data_queue.push(data);
         data_len + prev_len
     }
@@ -242,7 +251,10 @@ impl Processor {
     pub fn output(&self) -> Output {
         let message_queue = self.output_message_queue.clone();
         let used_buffer_queue = self.output_used_buffer_queue.clone();
-        Output { message_queue, used_buffer_queue }
+        Output {
+            message_queue,
+            used_buffer_queue,
+        }
     }
 
     /// Run the output processor, initialised with the given point and frame rates.
@@ -277,16 +289,19 @@ impl Processor {
                         Some(Close) => break,
                         _ => continue,
                     }
-                },
+                }
 
                 // Nothing to be done for **Stop** as we're not currently running anyway.
                 Message::Stop => {
-                    stream_shared.point_count.store(0, atomic::Ordering::Relaxed);
-                    stream_shared.buffer_fullness
+                    stream_shared
+                        .point_count
+                        .store(0, atomic::Ordering::Relaxed);
+                    stream_shared
+                        .buffer_fullness
                         .fetch_sub(unprocessed_points.len(), atomic::Ordering::Relaxed);
                     unprocessed_points.clear();
                     unprocessed_point_rates.clear();
-                },
+                }
 
                 // If the thread was closed, break from the loop.
                 Message::Close => break,
@@ -307,7 +322,11 @@ impl Processor {
             .spawn(move || {
                 self.run();
             })?;
-        let handle = Handle { shared, output, _thread };
+        let handle = Handle {
+            shared,
+            output,
+            _thread,
+        };
         Ok(handle)
     }
 }
@@ -332,14 +351,15 @@ fn run_output(
             match msg {
                 Message::Begin(_) => continue,
                 Message::Stop => {
-                    stream_shared.point_count.store(0, atomic::Ordering::Relaxed);
-                    stream_shared.buffer_fullness.fetch_sub(
-                        unprocessed_points.len(),
-                        atomic::Ordering::Relaxed,
-                    );
+                    stream_shared
+                        .point_count
+                        .store(0, atomic::Ordering::Relaxed);
+                    stream_shared
+                        .buffer_fullness
+                        .fetch_sub(unprocessed_points.len(), atomic::Ordering::Relaxed);
                     unprocessed_points.clear();
                     unprocessed_point_rates.clear();
-                },
+                }
                 Message::Close => return Some(Close),
             }
         }
@@ -379,7 +399,7 @@ fn run_output(
                                 points_per_frame = (*point_rate / frame_rate) as usize;
                                 count = (frame_fract * points_per_frame as f32) as _;
                             }
-                        },
+                        }
                         _ => (),
                     }
                     frame_points.push(point);
@@ -389,8 +409,12 @@ fn run_output(
         }
 
         // Push the frame to the output queue.
-        stream_shared.buffer_fullness.fetch_sub(frame_points.len(), atomic::Ordering::Relaxed);
-        stream_shared.point_count.fetch_add(frame_points.len(), atomic::Ordering::Relaxed);
+        stream_shared
+            .buffer_fullness
+            .fetch_sub(frame_points.len(), atomic::Ordering::Relaxed);
+        stream_shared
+            .point_count
+            .fetch_add(frame_points.len(), atomic::Ordering::Relaxed);
         output_message_queue.push(OutputMessage::Data(frame_points));
 
         // Sleep for the duration of a single frame.

@@ -1,10 +1,10 @@
 //! Items related to the DAC emulator's broadcasting process.
 
 use ether_dream::dac;
-use ether_dream::protocol::{BROADCAST_PORT, DacBroadcast, SizeBytes, WriteBytes};
-use std::{io, net, thread, time};
-use std::sync::{mpsc, Arc, Mutex};
+use ether_dream::protocol::{DacBroadcast, SizeBytes, WriteBytes, BROADCAST_PORT};
 use std::sync::atomic::{self, AtomicBool};
+use std::sync::{mpsc, Arc, Mutex};
+use std::{io, net, thread, time};
 
 /// The broadcasting side of the DAC.
 ///
@@ -30,7 +30,7 @@ pub struct Handle {
     tx: Tx,
     // A handle to the broadcaster thread.
     thread: Arc<Mutex<Option<thread::JoinHandle<io::Result<Broadcaster>>>>>,
-    // A handle to the 
+    // A handle to the
     once_per_second_timer: Arc<Mutex<Option<Timer>>>,
 }
 
@@ -77,7 +77,9 @@ impl Handle {
     ///
     /// Returns an **Err** if the **Broadcaster** thread has been closed.
     pub fn dac(&self, dac: dac::Addressed) -> Result<(), mpsc::SendError<()>> {
-        self.tx.send(Message::Dac(dac)).map_err(|_| mpsc::SendError(()))
+        self.tx
+            .send(Message::Dac(dac))
+            .map_err(|_| mpsc::SendError(()))
     }
 
     /// Spawns a **Timer** that sends **Message::Send** to the **Broadcaster** thread once per
@@ -86,7 +88,10 @@ impl Handle {
     /// If this was already called and a timer is already running, the existing timer will be
     /// closed and this timer will replace it.
     pub fn spawn_once_per_second_timer(&self) -> io::Result<()> {
-        let mut guard = self.once_per_second_timer.lock().expect("failed to lock timer");
+        let mut guard = self
+            .once_per_second_timer
+            .lock()
+            .expect("failed to lock timer");
         guard.take();
         *guard = Some(spawn_once_per_second_timer(self.tx.clone())?);
         Ok(())
@@ -116,8 +121,7 @@ impl Broadcaster {
         dac: dac::Addressed,
         bind_port: u16,
         broadcast_ip: net::Ipv4Addr,
-    ) -> io::Result<Broadcaster>
-    {
+    ) -> io::Result<Broadcaster> {
         let broadcast_addr = net::SocketAddrV4::new(broadcast_ip, BROADCAST_PORT);
         let bind_addr = net::SocketAddrV4::new([0, 0, 0, 0].into(), bind_port);
         let udp_socket = net::UdpSocket::bind(bind_addr)?;
@@ -203,7 +207,11 @@ impl Broadcaster {
             })?;
         let thread = Arc::new(Mutex::new(Some(thread)));
         let once_per_second_timer = Arc::new(Mutex::new(None));
-        Ok(Handle { tx, thread, once_per_second_timer })
+        Ok(Handle {
+            tx,
+            thread,
+            once_per_second_timer,
+        })
     }
 }
 

@@ -105,8 +105,8 @@ pub fn new(description: Description) -> io::Result<(Broadcaster, Listener)> {
     } = description;
 
     let dac_status = initial_status();
-    let status = dac::Status::from_protocol(&dac_status)
-        .expect("failed to interpret initial state");
+    let status =
+        dac::Status::from_protocol(&dac_status).expect("failed to interpret initial state");
     let dac = Dac {
         hw_revision,
         sw_revision,

@@ -19,7 +19,7 @@ use std::sync::mpsc;
 use std::{net, thread};
 
 fn main() {
-    nannou::run(model, event, view);
+    nannou::app(model).update(update).run();
 }
 
 struct Model {
@@ -29,7 +29,9 @@ struct Model {
     stream_rx: mpsc::Receiver<(listener::ActiveStream, net::SocketAddr)>,
 }
 
-fn model(_app: &App) -> Model {
+fn model(app: &App) -> Model {
+    app.new_window().view(view).build();
+
     let dac_description = Default::default();
     let (broadcaster, mut listener) = ether_dream_dac_emulator::new(dac_description).unwrap();
 
@@ -56,41 +58,38 @@ fn model(_app: &App) -> Model {
     Model { broadcaster, stream, stream_rx, frame_points }
 }
 
-fn event(_app: &App, mut model: Model, event: Event) -> Model {
-    if let Event::Update(_update) = event {
-        // Check for stream connections.
-        if let Ok((stream, addr)) = model.stream_rx.try_recv() {
-            println!("Connected to {}!", addr);
-            model.stream = Some(stream);
-        }
+fn update(_app: &App, model: &mut Model, _update: Update) {
+    // Check for stream connections.
+    if let Ok((stream, addr)) = model.stream_rx.try_recv() {
+        println!("Connected to {}!", addr);
+        model.stream = Some(stream);
+    }
 
-        // Check for new frames.
-        if let Some(output) = model.stream.as_ref().map(|stream| stream.output()) {
-            let mut latest_frame = None;
-            loop {
-                match output.try_next_frame() {
-                    Err(_) => {
-                        println!("Stream shutdown.");
-                        model.stream.take();
-                    },
-                    Ok(None) => break,
-                    Ok(Some(frame)) => {
-                        latest_frame = Some(frame);
-                    }
+    // Check for new frames.
+    if let Some(output) = model.stream.as_ref().map(|stream| stream.output()) {
+        let mut latest_frame = None;
+        loop {
+            match output.try_next_frame() {
+                Err(_) => {
+                    println!("Stream shutdown.");
+                    model.stream.take();
+                },
+                Ok(None) => break,
+                Ok(Some(frame)) => {
+                    latest_frame = Some(frame);
                 }
             }
-            if let Some(frame) = latest_frame {
-                model.frame_points.clear();
-                model.frame_points.extend(frame.iter().cloned());
-            }
+        }
+        if let Some(frame) = latest_frame {
+            model.frame_points.clear();
+            model.frame_points.extend(frame.iter().cloned());
         }
     }
-    model
 }
 
 // Draw the state of your `Model` into the given `Frame` here.
-fn view(app: &App, model: &Model, frame: Frame) -> Frame {
-    // Begin drawing 
+fn view(app: &App, model: &Model, frame: Frame) {
+    // Begin drawing
     let draw = app.draw();
 
     // Clear the background to blue.
@@ -118,8 +117,13 @@ fn view(app: &App, model: &Model, frame: Frame) -> Frame {
             .rgb(ar, ag, ab);
     }
 
-    draw.to_frame(app, &frame).unwrap();
+    if model.stream.is_none() {
+        draw.text("Awaiting connection...")
+            .w(300.0)
+            .font_size(24)
+            .color(RED);
+    }
 
-    // Return the cleared frame.
-    frame
+
+    draw.to_frame(app, &frame).unwrap();
 }

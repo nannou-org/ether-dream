@@ -1,4 +1,4 @@
-# ether-dream [![Build Status](https://travis-ci.org/nannou-org/ether-dream.svg?branch=master)](https://travis-ci.org/nannou-org/ether-dream) [![Crates.io](https://img.shields.io/crates/v/ether-dream.svg)](https://crates.io/crates/ether-dream) [![Crates.io](https://img.shields.io/crates/l/ether-dream.svg)](https://github.com/nannou-org/ether-dream/blob/master/LICENSE-MIT) [![docs.rs](https://docs.rs/ether-dream/badge.svg)](https://docs.rs/ether-dream/)
+# ether-dream [![Build Status](https://github.com/nannou-org/ether-dream/workflows/ether-dream/badge.svg)](https://github.com/nannou-org/ether-dream/actions) [![Crates.io](https://img.shields.io/crates/v/ether-dream.svg)](https://crates.io/crates/ether-dream) [![Crates.io](https://img.shields.io/crates/l/ether-dream.svg)](https://github.com/nannou-org/ether-dream/blob/master/LICENSE-MIT) [![docs.rs](https://docs.rs/ether-dream/badge.svg)](https://docs.rs/ether-dream/)
 
 A pure-rust implementation of the Ether Dream Laser DAC protocol.
 

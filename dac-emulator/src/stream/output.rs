@@ -120,7 +120,7 @@ pub struct Handle {
     shared: Arc<StreamShared>,
     /// An output instance.
     output: Output,
-    thread: thread::JoinHandle<()>,
+    _thread: thread::JoinHandle<()>,
 }
 
 // Data shared between an output processor and its handle.
@@ -302,12 +302,12 @@ impl Processor {
     pub fn spawn(mut self) -> io::Result<Handle> {
         let output = self.output();
         let shared = self.stream_shared.clone();
-        let thread = thread::Builder::new()
+        let _thread = thread::Builder::new()
             .name("ether-dream-dac-emulator-stream-output-processor".into())
             .spawn(move || {
                 self.run();
             })?;
-        let handle = Handle { shared, output, thread };
+        let handle = Handle { shared, output, _thread };
         Ok(handle)
     }
 }
@@ -419,14 +419,10 @@ impl ops::Deref for Frame {
     }
 }
 
-impl Error for StreamClosed {
-    fn description(&self) -> &str {
-        "the stream has closed"
-    }
-}
+impl Error for StreamClosed {}
 
 impl fmt::Display for StreamClosed {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        write!(f, "{}", self.description())
+        write!(f, "the stream has closed")
     }
 }

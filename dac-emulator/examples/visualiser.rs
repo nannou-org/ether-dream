@@ -23,14 +23,14 @@ fn main() {
 }
 
 struct Model {
-    broadcaster: broadcaster::Handle,
+    _broadcaster: broadcaster::Handle,
     stream: Option<listener::ActiveStream>,
     frame_points: Vec<ether_dream::protocol::DacPoint>,
     stream_rx: mpsc::Receiver<(listener::ActiveStream, net::SocketAddr)>,
 }
 
 fn model(app: &App) -> Model {
-    app.new_window().view(view).build();
+    app.new_window().view(view).build().unwrap();
 
     let dac_description = Default::default();
     let (broadcaster, mut listener) = ether_dream_dac_emulator::new(dac_description).unwrap();
@@ -55,7 +55,7 @@ fn model(app: &App) -> Model {
     // The buffer to use for collecting frame points.
     let frame_points = Vec::new();
 
-    Model { broadcaster, stream, stream_rx, frame_points }
+    Model { _broadcaster: broadcaster, stream, stream_rx, frame_points }
 }
 
 fn update(_app: &App, model: &mut Model, _update: Update) {

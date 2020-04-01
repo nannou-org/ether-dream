@@ -44,7 +44,7 @@ fn main() {
     let mut sine_wave = SineWave { point: 0, points_per_frame, frames_per_second };
 
     // Queue the initial frame and tell the DAC to begin producing output.
-    let n_points = points_to_generate(stream.dac());;
+    let n_points = points_to_generate(stream.dac());
     stream
         .queue_commands()
         .data(sine_wave.by_ref().take(n_points))
@@ -59,7 +59,7 @@ fn main() {
     // Loop and continue to send points forever.
     loop {
         // Determine how many points the DAC can currently receive.
-        let n_points = points_to_generate(stream.dac());;
+        let n_points = points_to_generate(stream.dac());
         if let Err(err) = stream
             .queue_commands()
             .data(sine_wave.by_ref().take(n_points))

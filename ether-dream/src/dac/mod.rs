@@ -3,7 +3,7 @@
 pub mod stream;
 
 use byteorder;
-use protocol::{self, command, Command as CommandTrait, ReadFromBytes, WriteToBytes};
+use crate::protocol::{self, command, Command as CommandTrait, ReadFromBytes, WriteToBytes};
 use std::error::Error;
 use std::{fmt, io, ops};
 pub use self::stream::Stream;
@@ -536,16 +536,13 @@ impl<'a> From<command::Ping> for Command<'a> {
 
 impl fmt::Display for ProtocolError {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        write!(f, "{}", self.description())
-    }
-}
-
-impl Error for ProtocolError {
-    fn description(&self) -> &str {
-        match *self {
+        let s = match *self {
             ProtocolError::UnknownLightEngineState => "unknown light engine state",
             ProtocolError::UnknownPlaybackState => "unknown playback state",
             ProtocolError::UnknownDataSource => "unknown data source",
-        }
+        };
+        write!(f, "{}", s)
     }
 }
+
+impl Error for ProtocolError {}

@@ -31,13 +31,13 @@ pub trait ReadBytes {
 /// Protocol types that may be written to little endian bytes.
 pub trait WriteToBytes {
     /// Write the command to bytes.
-    fn write_to_bytes<W: WriteBytesExt>(&self, W) -> io::Result<()>;
+    fn write_to_bytes<W: WriteBytesExt>(&self, writer: W) -> io::Result<()>;
 }
 
 /// Protocol types that may be read from little endian bytes.
 pub trait ReadFromBytes: Sized {
     /// Read the command from bytes.
-    fn read_from_bytes<R: ReadBytesExt>(R) -> io::Result<Self>;
+    fn read_from_bytes<R: ReadBytesExt>(reader: R) -> io::Result<Self>;
 }
 
 /// Types that have a constant size when written to or read from bytes.
@@ -74,7 +74,7 @@ pub struct DacStatus {
     /// - `3`: Emergency stop occurred due to over-temperature condition.
     /// - `4`: Over-temperature condition is currently active.
     /// - `5`: Emergency stop occurred due to loss of ethernet link.
-    /// 
+    ///
     /// All remaining are reserved for future use.
     pub light_engine_flags: u16,
     /// These flags may be non-zero during normal operation.
@@ -475,7 +475,7 @@ pub mod command {
     /// played (see the `WriteData` command).
     ///
     /// If the DAC's playback state is not `Prepared` or `Playing`, it replies with NAK - Invalid.
-    /// 
+    ///
     /// If the point rate buffer is full, it replies with NAK - Full.
     ///
     /// Otherwise, it replies with ACK.

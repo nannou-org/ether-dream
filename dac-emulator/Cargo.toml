@@ -8,10 +8,11 @@ keywords = ["laser", "emulator", "protocol", "etherdream", "dac"]
 license = "MIT OR Apache-2.0"
 repository = "https://github.com/nannou-org/ether-dream.git"
 homepage = "https://github.com/nannou-org/ether-dream"
+edition = "2018"
 
 [dependencies]
 crossbeam = "0.3"
-ether-dream = "0.2"
+ether-dream = { version = "0.2", path = "../ether-dream" }
 
 [dev-dependencies]
 nannou = "0.13"

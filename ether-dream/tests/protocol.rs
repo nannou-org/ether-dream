@@ -1,7 +1,7 @@
 extern crate ether_dream;
 
-use ether_dream::protocol::{Command, ReadBytes, SizeBytes, WriteBytes};
 use ether_dream::protocol::{command, DacBroadcast, DacPoint, DacResponse, DacStatus};
+use ether_dream::protocol::{Command, ReadBytes, SizeBytes, WriteBytes};
 use std::borrow::Cow;
 
 // Writes the given struct to a buffer then reads it.

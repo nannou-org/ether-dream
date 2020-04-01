@@ -2,11 +2,11 @@
 
 pub mod stream;
 
-use byteorder;
+pub use self::stream::Stream;
 use crate::protocol::{self, command, Command as CommandTrait, ReadFromBytes, WriteToBytes};
+use byteorder;
 use std::error::Error;
 use std::{fmt, io, ops};
-pub use self::stream::Stream;
 
 /// A DAC along with its broadcasted MAC address.
 ///
@@ -371,17 +371,14 @@ impl DataSource {
     /// Returns `None` if the given `source` byte is not known.
     pub fn from_protocol(source: u8, flags: u16) -> Option<Self> {
         match source {
-            protocol::DacStatus::SOURCE_NETWORK_STREAMING => {
-                Some(DataSource::NetworkStreaming)
-            },
+            protocol::DacStatus::SOURCE_NETWORK_STREAMING => Some(DataSource::NetworkStreaming),
             protocol::DacStatus::SOURCE_ILDA_PLAYBACK_SD => {
-                Some(IldaPlaybackFlags::from_bits_truncate(flags))
-                    .map(DataSource::IldaPlayback)
-            },
+                Some(IldaPlaybackFlags::from_bits_truncate(flags)).map(DataSource::IldaPlayback)
+            }
             protocol::DacStatus::SOURCE_INTERNAL_ABSTRACT_GENERATOR => {
                 Some(InternalAbstractGeneratorFlags::from_bits_truncate(flags))
                     .map(DataSource::InternalAbstractGenerator)
-            },
+            }
             _ => None,
         }
     }
@@ -391,15 +388,14 @@ impl DataSource {
     /// Returns the `source` and the `source_flags` fields respectively.
     pub fn to_protocol(&self) -> (u8, u16) {
         match *self {
-            DataSource::NetworkStreaming => {
-                (protocol::DacStatus::SOURCE_NETWORK_STREAMING, 0)
-            },
+            DataSource::NetworkStreaming => (protocol::DacStatus::SOURCE_NETWORK_STREAMING, 0),
             DataSource::IldaPlayback(ref flags) => {
                 (protocol::DacStatus::SOURCE_ILDA_PLAYBACK_SD, flags.bits())
-            },
-            DataSource::InternalAbstractGenerator(ref flags) => {
-                (protocol::DacStatus::SOURCE_INTERNAL_ABSTRACT_GENERATOR, flags.bits())
-            },
+            }
+            DataSource::InternalAbstractGenerator(ref flags) => (
+                protocol::DacStatus::SOURCE_INTERNAL_ABSTRACT_GENERATOR,
+                flags.bits(),
+            ),
         }
     }
 }
@@ -439,7 +435,11 @@ impl ops::Deref for MacAddress {
 impl fmt::Display for MacAddress {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         let a = &self.0;
-        write!(f, "{:X}:{:X}:{:X}:{:X}:{:X}:{:X}", a[0], a[1], a[2], a[3], a[4], a[5])
+        write!(
+            f,
+            "{:X}:{:X}:{:X}:{:X}:{:X}:{:X}",
+            a[0], a[1], a[2], a[3], a[4], a[5]
+        )
     }
 }
 

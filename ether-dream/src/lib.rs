@@ -1,6 +1,7 @@
 //! A full implementation of the Ether Dream laser protocol.
 
-#[macro_use] extern crate bitflags;
+#[macro_use]
+extern crate bitflags;
 extern crate byteorder;
 
 pub mod dac;
@@ -41,7 +42,7 @@ impl RecvDacBroadcasts {
 ///
 /// ```no_run
 /// extern crate ether_dream;
-/// 
+///
 /// fn main() {
 ///     let dac_broadcasts = ether_dream::recv_dac_broadcasts().expect("failed to bind to UDP socket");
 ///     for dac_broadcast in dac_broadcasts {

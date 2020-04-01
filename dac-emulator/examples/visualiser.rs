@@ -13,7 +13,7 @@
 extern crate ether_dream_dac_emulator;
 extern crate nannou;
 
-use ether_dream_dac_emulator::{ether_dream, broadcaster, listener};
+use ether_dream_dac_emulator::{broadcaster, ether_dream, listener};
 use nannou::prelude::*;
 use std::sync::mpsc;
 use std::{net, thread};
@@ -55,7 +55,12 @@ fn model(app: &App) -> Model {
     // The buffer to use for collecting frame points.
     let frame_points = Vec::new();
 
-    Model { _broadcaster: broadcaster, stream, stream_rx, frame_points }
+    Model {
+        _broadcaster: broadcaster,
+        stream,
+        stream_rx,
+        frame_points,
+    }
 }
 
 fn update(_app: &App, model: &mut Model, _update: Update) {
@@ -73,7 +78,7 @@ fn update(_app: &App, model: &mut Model, _update: Update) {
                 Err(_) => {
                     println!("Stream shutdown.");
                     model.stream.take();
-                },
+                }
                 Ok(None) => break,
                 Ok(Some(frame)) => {
                     latest_frame = Some(frame);
@@ -112,9 +117,7 @@ fn view(app: &App, model: &Model, frame: Frame) {
     for window in model.frame_points.windows(2) {
         let (ap, (ar, ag, ab)) = convert_point(&window[0]);
         let (bp, (_br, _bg, _bb)) = convert_point(&window[1]);
-        draw.line()
-            .points(ap, bp)
-            .rgb(ar, ag, ab);
+        draw.line().points(ap, bp).rgb(ar, ag, ab);
     }
 
     if model.stream.is_none() {
@@ -123,7 +126,6 @@ fn view(app: &App, model: &Model, frame: Frame) {
             .font_size(24)
             .color(RED);
     }
-
 
     draw.to_frame(app, &frame).unwrap();
 }

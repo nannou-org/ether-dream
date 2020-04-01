@@ -1,6 +1,6 @@
 //! Types and constants that precisely match the specification.
 
-use byteorder::{LE, ReadBytesExt, WriteBytesExt};
+use byteorder::{ReadBytesExt, WriteBytesExt, LE};
 use std::io;
 
 pub use self::command::Command;
@@ -432,10 +432,10 @@ where
 /// the host had sent a ping packet. The host sends to the device a series of commands. All
 /// commands receive a response from the DAC.
 pub mod command {
-    use byteorder::{LE, ReadBytesExt, WriteBytesExt};
+    use super::{DacPoint, ReadBytes, ReadFromBytes, SizeBytes, WriteBytes, WriteToBytes};
+    use byteorder::{ReadBytesExt, WriteBytesExt, LE};
     use std::borrow::Cow;
     use std::{self, io};
-    use super::{DacPoint, ReadBytes, ReadFromBytes, SizeBytes, WriteBytes, WriteToBytes};
 
     /// Types that may be submitted as commands to the DAC.
     pub trait Command {
@@ -546,7 +546,10 @@ pub mod command {
         pub fn read_fields<R: ReadBytesExt>(mut reader: R) -> io::Result<Self> {
             let low_water_mark = reader.read_u16::<LE>()?;
             let point_rate = reader.read_u32::<LE>()?;
-            let begin = Begin { low_water_mark, point_rate };
+            let begin = Begin {
+                low_water_mark,
+                point_rate,
+            };
             Ok(begin)
         }
     }
@@ -611,7 +614,9 @@ pub mod command {
             let n_points = Self::read_n_points(&mut reader)?;
             let mut data = Vec::with_capacity(n_points as _);
             Self::read_points(reader, n_points, &mut data)?;
-            let data = Data { points: Cow::Owned(data) };
+            let data = Data {
+                points: Cow::Owned(data),
+            };
             Ok(data)
         }
     }

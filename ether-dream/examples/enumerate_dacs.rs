@@ -4,32 +4,30 @@ extern crate ether_dream;
 
 use ether_dream::dac;
 use std::collections::HashMap;
-use std::{sync, thread, time};
+use std::{io, time};
 
 fn main() {
     println!("Searching for Ether Dream DACs...");
 
-    let (dac_tx, dac_rx) = sync::mpsc::channel();
-    thread::spawn(move || {
-        ether_dream::recv_dac_broadcasts()
-            .expect("failed to bind to UDP socket")
-            .filter_map(Result::ok)
-            .for_each(|(dac_broadcast, source_addr)| {
-                let dac = dac::Addressed::from_broadcast(&dac_broadcast)
-                    .expect("failed to interpret DAC status from received broadcast");
-                dac_tx.send((dac, source_addr)).unwrap();
-            });
-    });
-
     let mut dacs = HashMap::new();
+    let three_secs = time::Duration::from_secs(3);
+    let mut rx = ether_dream::recv_dac_broadcasts().expect("failed to bind to UDP socket");
+    rx.set_timeout(Some(three_secs))
+        .expect("failed to set timeout on UDP socket");
     let loop_start = time::Instant::now();
-    while time::Instant::now().duration_since(loop_start) < time::Duration::from_secs(3) {
-        for (dac::Addressed { mac_address, dac }, source_addr) in dac_rx.try_iter() {
-            if dacs.insert(mac_address, (dac, source_addr)).is_none() {
-                println!("Discovered new DAC \"{}\"...", mac_address);
-            }
+    while loop_start.elapsed() < three_secs {
+        let (dac_broadcast, source_addr) = match rx.next_broadcast() {
+            Ok(dac) => dac,
+            Err(e) => match e.kind() {
+                io::ErrorKind::WouldBlock | io::ErrorKind::TimedOut => continue,
+                _ => panic!("an IO error occurred: {}", e),
+            },
+        };
+        let dac::Addressed { mac_address, dac } = dac::Addressed::from_broadcast(&dac_broadcast)
+            .expect("failed to interpret DAC status from received broadcast");
+        if dacs.insert(mac_address, (dac, source_addr)).is_none() {
+            println!("Discovered new DAC \"{}\"...", mac_address);
         }
-        thread::sleep(time::Duration::from_millis(100));
     }
 
     if dacs.is_empty() {

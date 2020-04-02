@@ -11,8 +11,6 @@ pub struct Stream {
     dac: dac::Addressed,
     /// The TCP stream used for communicating with the DAC.
     tcp_stream: net::TcpStream,
-    /// The timeout duration that should be applied when attempting to read from the TCP stream.
-    _timeout: Option<time::Duration>,
     /// A buffer to re-use for queueing commands via the `queue_commands` method.
     command_buffer: Vec<QueuedCommand>,
     /// A buffer to re-use for queueing points for `Data` commands.
@@ -149,38 +147,35 @@ impl Stream {
     pub fn ttl(&self) -> io::Result<u32> {
         self.tcp_stream.ttl()
     }
-}
 
-// Used within the `Stream::send_command` method.
-fn send_command<C>(
-    bytes: &mut Vec<u8>,
-    tcp_stream: &mut net::TcpStream,
-    command: C,
-) -> io::Result<()>
-where
-    C: Command + WriteToBytes,
-{
-    bytes.clear();
-    bytes.write_bytes(command)?;
-    tcp_stream.write(bytes)?;
-    Ok(())
-}
+    /// Sets the read timeout of the underlying `TcpStream`.
+    ///
+    /// See the following for details:
+    ///
+    /// - [`std::net::TcpStream::set_read_timeout`](https://doc.rust-lang.org/std/net/struct.TcpStream.html#method.set_read_timeout)
+    pub fn set_read_timeout(&self, duration: Option<time::Duration>) -> io::Result<()> {
+        self.tcp_stream.set_read_timeout(duration)
+    }
 
-// Used within the `Stream::recv_response` and `Stream::connect` methods.
-fn recv_response(
-    bytes: &mut Vec<u8>,
-    tcp_stream: &mut net::TcpStream,
-    dac: &mut dac::Addressed,
-    expected_command: u8,
-) -> Result<(), CommunicationError> {
-    // Read the response.
-    bytes.resize(protocol::DacResponse::SIZE_BYTES, 0);
-    tcp_stream.read_exact(bytes)?;
-    let response = (&bytes[..]).read_bytes::<protocol::DacResponse>()?;
-    response.check_errors(expected_command)?;
-    // Update the DAC representation.
-    dac.update_status(&response.dac_status)?;
-    Ok(())
+    /// Sets the write timeout of the underlying `TcpStream`.
+    ///
+    /// See the following for details:
+    ///
+    /// - [`std::net::TcpStream::set_write_timeout`](https://doc.rust-lang.org/std/net/struct.TcpStream.html#method.set_write_timeout)
+    pub fn set_write_timeout(&self, duration: Option<time::Duration>) -> io::Result<()> {
+        self.tcp_stream.set_write_timeout(duration)
+    }
+
+    /// Sets the read and write timeout of the underlying `TcpStream`.
+    ///
+    /// See the following for details:
+    ///
+    /// - [`std::net::TcpStream::set_read_timeout`](https://doc.rust-lang.org/std/net/struct.TcpStream.html#method.set_read_timeout)
+    /// - [`std::net::TcpStream::set_write_timeout`](https://doc.rust-lang.org/std/net/struct.TcpStream.html#method.set_write_timeout)
+    pub fn set_timeout(&self, duration: Option<time::Duration>) -> io::Result<()> {
+        self.set_read_timeout(duration)?;
+        self.set_write_timeout(duration)
+    }
 }
 
 impl<'a> CommandQueue<'a> {
@@ -473,12 +468,33 @@ pub fn connect(
     broadcast: &protocol::DacBroadcast,
     dac_ip: net::IpAddr,
 ) -> Result<Stream, CommunicationError> {
+    connect_inner(broadcast, dac_ip, &net::TcpStream::connect)
+}
+
+/// Establishes a TCP stream connection with the DAC at the given address.
+///
+/// This behaves the same as `connect`, but times out after the given duration.
+pub fn connect_timeout(
+    broadcast: &protocol::DacBroadcast,
+    dac_ip: net::IpAddr,
+    timeout: time::Duration,
+) -> Result<Stream, CommunicationError> {
+    let connect = |addr| net::TcpStream::connect_timeout(&addr, timeout);
+    connect_inner(broadcast, dac_ip, &connect)
+}
+
+/// Shared between the `connect` and `connect_timeout` implementations.
+fn connect_inner(
+    broadcast: &protocol::DacBroadcast,
+    dac_ip: net::IpAddr,
+    connect: &dyn Fn(net::SocketAddr) -> io::Result<net::TcpStream>,
+) -> Result<Stream, CommunicationError> {
     // Initialise the DAC state representation.
     let mut dac = dac::Addressed::from_broadcast(broadcast)?;
 
     // Connect the TCP stream.
     let dac_addr = net::SocketAddr::new(dac_ip, protocol::COMMUNICATION_PORT);
-    let mut tcp_stream = net::TcpStream::connect(dac_addr)?;
+    let mut tcp_stream = connect(dac_addr)?;
 
     // Enable `TCP_NODELAY` for better low-latency suitability.
     tcp_stream.set_nodelay(true)?;
@@ -498,11 +514,42 @@ pub fn connect(
     let stream = Stream {
         dac,
         tcp_stream,
-        _timeout: None,
         command_buffer: vec![],
         point_buffer: vec![],
         bytes,
     };
 
     Ok(stream)
+}
+
+/// Used within the `Stream::send_command` method.
+fn send_command<C>(
+    bytes: &mut Vec<u8>,
+    tcp_stream: &mut net::TcpStream,
+    command: C,
+) -> io::Result<()>
+where
+    C: Command + WriteToBytes,
+{
+    bytes.clear();
+    bytes.write_bytes(command)?;
+    tcp_stream.write(bytes)?;
+    Ok(())
+}
+
+/// Used within the `Stream::recv_response` and `Stream::connect` methods.
+fn recv_response(
+    bytes: &mut Vec<u8>,
+    tcp_stream: &mut net::TcpStream,
+    dac: &mut dac::Addressed,
+    expected_command: u8,
+) -> Result<(), CommunicationError> {
+    // Read the response.
+    bytes.resize(protocol::DacResponse::SIZE_BYTES, 0);
+    tcp_stream.read_exact(bytes)?;
+    let response = (&bytes[..]).read_bytes::<protocol::DacResponse>()?;
+    response.check_errors(expected_command)?;
+    // Update the DAC representation.
+    dac.update_status(&response.dac_status)?;
+    Ok(())
 }

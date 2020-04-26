@@ -11,8 +11,13 @@ homepage = "https://github.com/nannou-org/ether-dream"
 edition = "2018"
 
 [dependencies]
-crossbeam = "0.3"
 ether-dream = { version = "0.2", path = "../ether-dream" }
+futures = "0.3"
+piper = { git = "https://github.com/stjepang/piper", branch = "master" }
+smol = { path = "../../smol" }
 
 [dev-dependencies]
-nannou = "0.13"
+nannou = "0.14"
+smol = { path = "../../smol", features = ["tokio02"] }
+tokio = { version = "0.2", features = ["full"] }
+async-std = "1"

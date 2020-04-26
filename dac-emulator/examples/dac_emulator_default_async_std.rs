@@ -1,6 +1,9 @@
 use futures::prelude::*;
 
 fn main() -> std::io::Result<()> {
+    // Activate the smol executor to poll timers and I/O used within `ether_dream_dac_emulator`.
+    std::thread::spawn(|| smol::run(future::pending::<()>()));
+
     let dac_description = Default::default();
     println!(
         "Creating an emulator for the following Ether Dream DAC:\n{:#?}",
@@ -28,7 +31,7 @@ fn main() -> std::io::Result<()> {
             println!("Disconnected from {}.", addr);
         };
         println!("Stopped listening: {}", err);
-        Err(err)
+        std::io::Result::<()>::Err(err)
     };
 
     let dac = async move {
@@ -38,5 +41,5 @@ fn main() -> std::io::Result<()> {
         Ok(())
     };
 
-    smol::run(dac)
+    async_std::task::block_on(dac)
 }

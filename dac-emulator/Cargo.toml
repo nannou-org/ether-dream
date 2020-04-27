@@ -13,11 +13,10 @@ edition = "2018"
 [dependencies]
 ether-dream = { version = "0.2", path = "../ether-dream" }
 futures = "0.3"
-piper = { git = "https://github.com/stjepang/piper", branch = "master" }
-smol = { path = "../../smol" }
+piper = "0.1"
+smol = "0.1"
 
 [dev-dependencies]
 nannou = "0.14"
-smol = { path = "../../smol", features = ["tokio02"] }
 tokio = { version = "0.2", features = ["full"] }
 async-std = "1"

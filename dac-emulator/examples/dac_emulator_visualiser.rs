@@ -70,7 +70,7 @@ fn model(app: &App) -> Model {
     }
 }
 
-fn update(_app: &App, model: &mut Model, update: Update) {
+fn update(_app: &App, model: &mut Model, _update: Update) {
     // Process all events.
     for event in model.event_rx.try_iter() {
         match event {

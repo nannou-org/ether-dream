@@ -1,37 +1,47 @@
 //! The TCP stream between a client and the DAC.
 
-mod output;
-
 use ether_dream::dac;
 use ether_dream::protocol::{
     self, command, Command as CommandTrait, ReadBytes, SizeBytes, WriteBytes,
 };
-use std::io::{self, Read, Write};
-use std::{net, thread};
-
-pub use self::output::Output;
+use futures::future::FutureExt;
+use futures::io::{AsyncReadExt, AsyncWriteExt};
+use piper::Mutex;
+use smol::Async;
+use std::collections::VecDeque;
+use std::{io, net};
 
 /// A stream of communication between a DAC and a user.
 ///
 /// The stream expects to receive **Command**s and responseds with **DacResponse**s.
 ///
 /// All communication occurs over a single TCP stream.
-///
-/// Processed data is submitted to the **stream::Output** with which the user may do what they
-/// like.
 pub struct Stream {
-    dac: dac::Addressed,
-    tcp_stream: net::TcpStream,
-    bytes: Box<[u8]>,
-    output_processor: output::Handle,
+    tcp: Tcp,
+    shared: Mutex<Shared>,
 }
 
-/// A handle to the threads that make up a user/DAC communication stream.
-pub struct Handle {
-    tcp_stream: net::TcpStream,
-    stream_thread: thread::JoinHandle<(dac::Addressed, io::Error)>,
-    output: Output,
+struct Shared {
+    dac: dac::Addressed,
+    state: State,
 }
+
+struct Tcp {
+    stream: Async<net::TcpStream>,
+    bytes: Box<[u8]>,
+}
+
+#[derive(Default)]
+pub struct State {
+    // The moment at which the next point should be emitted.
+    next_point_emission: Option<std::time::Instant>,
+    // The DAC's buffer of points. The length should never exceed `buffer_capacity`.
+    buffer: VecDeque<protocol::DacPoint>,
+}
+
+/// The stream DAC output stream underflowed due to insufficient data.
+#[derive(Debug)]
+pub struct Underflowed;
 
 /// Commands that the DAC may be receive via a **Stream**.
 #[derive(Debug)]
@@ -55,88 +65,17 @@ pub enum InterpretedCommand {
     Unknown { start_byte: u8 },
 }
 
-impl Handle {
-    /// Produce a handle to the **Output** of the stream.
-    ///
-    /// The returned **Output** yields **Frame**s of **DacPoint**s which may be used for debugging
-    /// or for visualisation.
-    pub fn output(&self) -> Output {
-        self.output.clone()
-    }
-
-    /// Wait for the DAC to finish communicating with the stream and return its resulting state.
-    pub fn wait(self) -> (dac::Addressed, io::Error) {
-        let Handle { stream_thread, .. } = self;
-        let result = stream_thread.join().expect("failed to join stream thread");
-        result
-    }
-
-    /// Force the TCP connection to close right now and return the resulting state of the DAC.
-    pub fn close(self) -> (dac::Addressed, io::Error) {
-        self.tcp_stream.shutdown(net::Shutdown::Both).ok();
-        self.wait()
-    }
-
-    /// This directly calls `set_nodelay` on the inner **TcpStream**. In other words, this sets the
-    /// value of the TCP_NODELAY option for this socket.
-    ///
-    /// Note that due to the necessity for very low-latency communication with the DAC, this API
-    /// enables `TCP_NODELAY` by default. This method is exposed in order to allow the user to
-    /// disable this if they wish.
-    ///
-    /// When not set, data is buffered until there is a sufficient amount to send out, thereby
-    /// avoiding the frequent sending of small packets. Although perhaps more efficient for the
-    /// network, this may result in DAC underflows if **Data** commands are delayed for too long.
-    pub fn set_nodelay(&self, b: bool) -> io::Result<()> {
-        self.tcp_stream.set_nodelay(b)
-    }
-
-    /// Gets the value of the TCP_NODELAY option for this socket.
-    ///
-    /// For more infnormation about this option, see `set_nodelay`.
-    pub fn nodelay(&self) -> io::Result<bool> {
-        self.tcp_stream.nodelay()
-    }
-
-    /// This directly calls `set_ttl` on the inner **TcpStream**. In other words, this sets the
-    /// value for the `IP_TTL` option on this socket.
-    ///
-    /// This value sets the time-to-live field that is used in every packet sent from this socket.
-    /// Time-to-live describes the number of hops between devices that a packet may make before it
-    /// is discarded/ignored.
-    pub fn set_ttl(&self, ttl: u32) -> io::Result<()> {
-        self.tcp_stream.set_ttl(ttl)
-    }
-
-    /// Gets the value of the `IP_TTL` option for this socket.
-    ///
-    /// For more information about this option see `set_ttl`.
-    pub fn ttl(&self) -> io::Result<u32> {
-        self.tcp_stream.ttl()
-    }
-}
-
 impl Stream {
     /// Initialise a new **Stream**.
     ///
     /// Internally this allocates a buffer of bytes whose size is the size of the largest possible
     /// **Data** command that may be received based on the DAC's buffer capacity.
     ///
-    /// Enables `TCP_NODELAY` on the given TCP socket in order to adhere to the low-latency,
-    /// realtime requirements.
+    /// Assumes `TCP_NODELAY` is already enabled on the given TCP socket in order to adhere to the
+    /// low-latency, realtime requirements.
     ///
     /// This function also spawns a thread used for processing output.
-    pub fn new(
-        dac: dac::Addressed,
-        tcp_stream: net::TcpStream,
-        output_frame_rate: u32,
-    ) -> io::Result<Self> {
-        // Create and spawn the output processor on its own thread.
-        let output_processor = output::Processor::new(output_frame_rate).spawn()?;
-
-        // Enable `TCP_NODELAY`.
-        tcp_stream.set_nodelay(true)?;
-
+    pub fn new(dac: dac::Addressed, stream: Async<net::TcpStream>) -> io::Result<Self> {
         // Prepare a buffer with the maximum expected command size.
         let bytes: Box<[u8]> = {
             let data_command_size_bytes = 1;
@@ -147,13 +86,15 @@ impl Stream {
                 data_command_size_bytes + data_len_size_bytes + max_points_size_bytes;
             vec![0u8; max_command_size].into()
         };
+        let state = State::default();
+        let shared = Mutex::new(Shared { dac, state });
+        let tcp = Tcp { stream, bytes };
+        Ok(Stream { tcp, shared })
+    }
 
-        Ok(Stream {
-            dac,
-            tcp_stream,
-            bytes,
-            output_processor,
-        })
+    /// Produce the current state of the DAC.
+    pub fn dac(&self) -> dac::Addressed {
+        self.shared.lock().dac.clone()
     }
 
     /// Handle TCP messages received on the given stream by attempting to interpret them as commands.
@@ -163,49 +104,29 @@ impl Stream {
     /// This runs forever until either an error occurs or the TCP stream is shutdown.
     ///
     /// Returns the **io::Error** that caused the loop to end.
-    pub fn run(&mut self) -> io::Error {
-        // Loop reading and responding to a command at a time.
+    // TODO: Should emit `Event`s, where an event can be points or a tcp communication event.
+    pub async fn next_points(
+        &mut self,
+    ) -> io::Result<Result<Vec<protocol::DacPoint>, Underflowed>> {
+        let Stream {
+            ref shared,
+            ref mut tcp,
+        } = *self;
         let err = loop {
-            match read_command_via_tcp_and_respond(self) {
-                Ok(()) => continue,
-                Err(err) => break err,
-            }
+            futures::select! {
+                res = emit_points(shared).fuse() => return Ok(res),
+                res = read_command_via_tcp_and_respond(shared, tcp).fuse() => match res {
+                    Ok(()) => continue,
+                    Err(err) => break err,
+                },
+            };
         };
-
-        // Stop the output processor thread. The thread will auto close when the stream is dropped.
-        self.output_processor.stop();
 
         // Ensure the TCP stream is shutdown before exiting the thread.
-        self.tcp_stream.shutdown(net::Shutdown::Both).ok();
+        self.tcp.stream.get_ref().shutdown(net::Shutdown::Both).ok();
 
-        err
-    }
-
-    /// Spawn a stream that receives **Command**s sent by the user via the given TCP stream, processes
-    /// them, updates the DAC state accordingly and responds via the TCP stream.
-    ///
-    /// Returns a **Handle** to the thread.
-    pub fn spawn(mut self) -> io::Result<Handle> {
-        let output = self.output_processor.output();
-        let tcp_stream = self.tcp_stream.try_clone()?;
-        let stream_thread = thread::Builder::new()
-            .name("ether-dream-dac-emulator-stream".into())
-            .spawn(move || {
-                let io_err = self.run();
-                let Stream {
-                    dac,
-                    output_processor,
-                    ..
-                } = self;
-                output_processor.close();
-                (dac, io_err)
-            })?;
-        let handle = Handle {
-            stream_thread,
-            tcp_stream,
-            output,
-        };
-        Ok(handle)
+        // TODO: Currently can only return err coz no safe way to close stream (e.g. via msg).
+        Err(err)
     }
 }
 
@@ -214,13 +135,13 @@ impl InterpretedCommand {
     ///
     /// This method blocks until the exact number of bytes necessary for the returned command are
     /// read.
-    pub fn read_from_tcp_stream(
+    pub async fn read_from_tcp_stream(
         bytes: &mut [u8],
-        tcp_stream: &mut net::TcpStream,
+        tcp_stream: &mut Async<net::TcpStream>,
     ) -> io::Result<Self> {
         // Peek the first byte to determine the command kind.
         bytes[0] = 0u8;
-        let len = tcp_stream.peek(&mut bytes[..1])?;
+        let len = tcp_stream.peek(&mut bytes[..1]).await?;
 
         // Empty messages should only happen if the stream has closed.
         if len == 0 {
@@ -233,17 +154,23 @@ impl InterpretedCommand {
         // Read the rest of the command from the stream based on the starting byte.
         let interpreted_command = match bytes[0] {
             command::PrepareStream::START_BYTE => {
-                tcp_stream.read_exact(&mut bytes[..command::PrepareStream::SIZE_BYTES])?;
+                tcp_stream
+                    .read_exact(&mut bytes[..command::PrepareStream::SIZE_BYTES])
+                    .await?;
                 let prepare_stream = (&bytes[..]).read_bytes::<command::PrepareStream>()?;
                 Command::PrepareStream(prepare_stream).into()
             }
             command::Begin::START_BYTE => {
-                tcp_stream.read_exact(&mut bytes[..command::Begin::SIZE_BYTES])?;
+                tcp_stream
+                    .read_exact(&mut bytes[..command::Begin::SIZE_BYTES])
+                    .await?;
                 let begin = (&bytes[..]).read_bytes::<command::Begin>()?;
                 Command::Begin(begin).into()
             }
             command::PointRate::START_BYTE => {
-                tcp_stream.read_exact(&mut bytes[..command::PointRate::SIZE_BYTES])?;
+                tcp_stream
+                    .read_exact(&mut bytes[..command::PointRate::SIZE_BYTES])
+                    .await?;
                 let point_rate = (&bytes[..]).read_bytes::<command::PointRate>()?;
                 Command::PointRate(point_rate).into()
             }
@@ -253,34 +180,42 @@ impl InterpretedCommand {
                 let n_points_bytes = 2;
                 let n_points_start = command_bytes;
                 let n_points_end = n_points_start + n_points_bytes;
-                tcp_stream.peek(&mut bytes[..n_points_end])?;
+                tcp_stream.peek(&mut bytes[..n_points_end]).await?;
                 let n_points = command::Data::read_n_points(&bytes[n_points_start..n_points_end])?;
 
                 // Use the number of points to determine how many bytes to read.
                 let data_bytes = n_points as usize * protocol::DacPoint::SIZE_BYTES;
                 let total_bytes = command_bytes + n_points_bytes + data_bytes;
-                tcp_stream.read_exact(&mut bytes[..total_bytes])?;
+                tcp_stream.read_exact(&mut bytes[..total_bytes]).await?;
                 let data = (&bytes[..]).read_bytes::<command::Data<'static>>()?;
                 Command::Data(data).into()
             }
             command::Stop::START_BYTE => {
-                tcp_stream.read_exact(&mut bytes[..command::Stop::SIZE_BYTES])?;
+                tcp_stream
+                    .read_exact(&mut bytes[..command::Stop::SIZE_BYTES])
+                    .await?;
                 let stop = (&bytes[..]).read_bytes::<command::Stop>()?;
                 Command::Stop(stop).into()
             }
             command::EmergencyStop::START_BYTE => {
-                tcp_stream.read_exact(&mut bytes[..command::EmergencyStop::SIZE_BYTES])?;
+                tcp_stream
+                    .read_exact(&mut bytes[..command::EmergencyStop::SIZE_BYTES])
+                    .await?;
                 let emergency_stop = (&bytes[..]).read_bytes::<command::EmergencyStop>()?;
                 Command::EmergencyStop(emergency_stop).into()
             }
             command::ClearEmergencyStop::START_BYTE => {
-                tcp_stream.read_exact(&mut bytes[..command::ClearEmergencyStop::SIZE_BYTES])?;
+                tcp_stream
+                    .read_exact(&mut bytes[..command::ClearEmergencyStop::SIZE_BYTES])
+                    .await?;
                 let clear_emergency_stop =
                     (&bytes[..]).read_bytes::<command::ClearEmergencyStop>()?;
                 Command::ClearEmergencyStop(clear_emergency_stop).into()
             }
             command::Ping::START_BYTE => {
-                tcp_stream.read_exact(&mut bytes[..command::Ping::SIZE_BYTES])?;
+                tcp_stream
+                    .read_exact(&mut bytes[..command::Ping::SIZE_BYTES])
+                    .await?;
                 let ping = (&bytes[..]).read_bytes::<command::Ping>()?;
                 Command::Ping(ping).into()
             }
@@ -297,27 +232,63 @@ impl From<Command> for InterpretedCommand {
     }
 }
 
+/// Produce a future representing the emission of the next point.
+async fn emit_points(shared: &Mutex<Shared>) -> Result<Vec<protocol::DacPoint>, Underflowed> {
+    let playback = shared.lock().dac.status.playback;
+    if let dac::Playback::Playing = playback {
+        let next = *shared
+            .lock()
+            .state
+            .next_point_emission
+            .get_or_insert_with(std::time::Instant::now);
+        let timer = smol::Timer::at(next);
+        timer.await;
+        let mut guard = shared.lock();
+        let shared = &mut *guard;
+        let interval = rate_interval(shared.dac.status.point_rate);
+        let next = shared.state.next_point_emission.as_mut().unwrap();
+        let mut output = vec![];
+        let now = std::time::Instant::now();
+        while *next < now {
+            *next += interval;
+            if let Some(pt) = shared.state.buffer.pop_front() {
+                output.push(pt);
+            }
+        }
+        shared.dac.status.buffer_fullness = shared.state.buffer.len() as u16;
+        shared.dac.status.point_count += output.len() as u32;
+        let result = if output.is_empty() {
+            Err(Underflowed)
+        } else {
+            Ok(output)
+        };
+        result
+    } else {
+        futures::future::pending::<_>().await
+    }
+}
+
 /// Read a single command from the TCP stream and respond.
 ///
 /// If a `read` occurred of `0` bytes, this function returns early and no response is sent.
-fn read_command_via_tcp_and_respond(stream: &mut Stream) -> io::Result<()> {
-    let Stream {
-        ref mut dac,
-        ref mut tcp_stream,
-        ref mut bytes,
-        ref output_processor,
-    } = *stream;
-
+async fn read_command_via_tcp_and_respond(shared: &Mutex<Shared>, tcp: &mut Tcp) -> io::Result<()> {
     // Read the command from the TCP stream.
-    let interpreted_command = InterpretedCommand::read_from_tcp_stream(bytes, tcp_stream)?;
+    let interpreted_command =
+        InterpretedCommand::read_from_tcp_stream(&mut tcp.bytes, &mut tcp.stream).await?;
 
     // Process command here.
-    let dac_response = process_interpreted_command(dac, interpreted_command, output_processor);
+    let dac_response = {
+        let mut guard = shared.lock();
+        let shared = &mut *guard;
+        let dac = &mut shared.dac;
+        let state = &mut shared.state;
+        process_interpreted_command(dac, state, interpreted_command)
+    };
 
     // Write the response to bytes.
     let response_len = protocol::DacResponse::SIZE_BYTES;
-    (&mut bytes[..response_len]).write_bytes(&dac_response)?;
-    tcp_stream.write(&bytes[..response_len])?;
+    (&mut tcp.bytes[..response_len]).write_bytes(&dac_response)?;
+    tcp.stream.write(&tcp.bytes[..response_len]).await?;
 
     Ok(())
 }
@@ -325,13 +296,13 @@ fn read_command_via_tcp_and_respond(stream: &mut Stream) -> io::Result<()> {
 /// Process the interpreted command, update the DAC state accordingly and produce a response.
 pub fn process_interpreted_command(
     dac: &mut dac::Addressed,
+    state: &mut State,
     interpreted_command: InterpretedCommand,
-    output_processor: &output::Handle,
 ) -> protocol::DacResponse {
     // Handle the interpreted command and create a response.
     match interpreted_command {
         // If the command was known, process it and update the DAC state.
-        InterpretedCommand::Known { command } => process_command(dac, command, output_processor),
+        InterpretedCommand::Known { command } => process_command(dac, state, command),
         // If the command was unknown, reply with a NAK - Invalid.
         InterpretedCommand::Unknown { start_byte } => {
             let dac_status = dac.status.to_protocol();
@@ -349,8 +320,8 @@ pub fn process_interpreted_command(
 /// Process the given the given **Command** and update the DAC state accordingly.
 pub fn process_command(
     dac: &mut dac::Addressed,
+    state: &mut State,
     command: Command,
-    output_processor: &output::Handle,
 ) -> protocol::DacResponse {
     let (response, command) = match command {
         // Prepare the stream for playback.
@@ -362,6 +333,8 @@ pub fn process_command(
                     dac.status.playback = dac::Playback::Prepared;
                     dac.status.point_count = 0;
                     dac.status.buffer_fullness = 0;
+                    state.buffer.clear();
+                    state.next_point_emission = None;
                     protocol::DacResponse::ACK
                 }
                 // Otherwise, reply with NAK - Invalid.
@@ -375,8 +348,7 @@ pub fn process_command(
         Command::Begin(begin) => {
             let response = match (dac.status.light_engine, dac.status.playback) {
                 (dac::LightEngine::Ready, dac::Playback::Prepared) => {
-                    if output_processor.buffer_fullness() > 0 {
-                        output_processor.begin(begin);
+                    if !state.buffer.is_empty() {
                         dac.status.playback = dac::Playback::Playing;
                         dac.status.point_rate = begin.point_rate;
                         protocol::DacResponse::ACK
@@ -395,7 +367,7 @@ pub fn process_command(
             let response = match (dac.status.light_engine, dac.status.playback) {
                 (dac::LightEngine::Ready, dac::Playback::Prepared)
                 | (dac::LightEngine::Ready, dac::Playback::Playing) => {
-                    output_processor.push_point_rate(point_rate);
+                    dac.status.point_rate = point_rate.0;
                     // TODO: If point rate buffer is full, respond with NAK - FULL.
                     protocol::DacResponse::ACK
                 }
@@ -410,17 +382,18 @@ pub fn process_command(
             let response = match (dac.status.light_engine, dac.status.playback) {
                 (dac::LightEngine::Ready, dac::Playback::Prepared)
                 | (dac::LightEngine::Ready, dac::Playback::Playing) => {
-                    let mut points = points.into_owned();
-                    let current_len = output_processor.buffer_fullness();
-                    let new_len = current_len + points.len();
-                    let response = if new_len < dac.buffer_capacity as usize {
+                    let current_len = state.buffer.len();
+                    let target_len = current_len + points.len();
+                    let new_len = std::cmp::min(target_len, dac.buffer_capacity as usize);
+                    state
+                        .buffer
+                        .extend(points.iter().take(new_len - current_len));
+                    let response = if target_len <= dac.buffer_capacity as usize {
                         protocol::DacResponse::ACK
                     } else {
-                        points.truncate(dac.buffer_capacity as usize - current_len);
                         protocol::DacResponse::NAK_FULL
                     };
-                    dac.status.buffer_fullness = output_processor.push_data(points) as _;
-                    dac.status.point_count = output_processor.point_count() as _;
+                    dac.status.buffer_fullness = state.buffer.len() as u16;
                     response
                 }
                 _unexpected_state => protocol::DacResponse::NAK_INVALID,
@@ -434,7 +407,6 @@ pub fn process_command(
             let response = match (dac.status.light_engine, dac.status.playback) {
                 (dac::LightEngine::Ready, dac::Playback::Prepared)
                 | (dac::LightEngine::Ready, dac::Playback::Playing) => {
-                    output_processor.stop();
                     dac.status.playback = dac::Playback::Idle;
                     protocol::DacResponse::ACK
                 }
@@ -446,7 +418,6 @@ pub fn process_command(
 
         // Immediately stop processing points and switch the LightEngine to ESTOP state.
         Command::EmergencyStop(_e_stop) => {
-            output_processor.stop();
             dac.status.light_engine = dac::LightEngine::EmergencyStop;
             dac.status.playback = dac::Playback::Idle;
             let response = protocol::DacResponse::ACK;
@@ -481,4 +452,12 @@ pub fn process_command(
         command,
         dac_status,
     }
+}
+
+/// Convert the rate in hz to the periodic interval duration.
+fn rate_interval(hz: u32) -> std::time::Duration {
+    let secsf = 1.0 / hz as f64;
+    let secs = secsf as u64;
+    let nanos = (1_000_000_000.0 * (secsf - secs as f64)) as u32;
+    std::time::Duration::new(secs, nanos)
 }

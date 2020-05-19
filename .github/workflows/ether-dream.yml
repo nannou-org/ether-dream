@@ -39,3 +39,23 @@ jobs:
       with:
         command: test
         args: --verbose
+
+  cargo-publish:
+    if: github.event_name == 'push' && github.ref == 'refs/heads/master'
+    env:
+      CRATESIO_TOKEN: ${{ secrets.CRATESIO_TOKEN }}
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v2
+    - name: Install stable
+      uses: actions-rs/toolchain@v1
+      with:
+        profile: minimal
+        toolchain: stable
+        override: true
+    - name: cargo publish ether-dream
+      continue-on-error: true
+      run: cargo publish --token $CRATESIO_TOKEN --manifest-path ether-dream/Cargo.toml
+    - name: cargo publish dac-emulator
+      continue-on-error: true
+      run: cargo publish --token $CRATESIO_TOKEN --manifest-path dac-emulator/Cargo.toml

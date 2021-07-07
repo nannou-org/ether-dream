@@ -144,13 +144,13 @@ fn view(app: &App, model: &Model, frame: Frame) {
         (pt2(x, y), lin_srgb(r, g, b))
     };
 
-    let color_blend = wgpu::BlendDescriptor {
+    let color_blend = wgpu::BlendComponent {
         src_factor: wgpu::BlendFactor::SrcAlpha,
         //dst_factor: BlendFactor::OneMinusSrcAlpha,
         dst_factor: wgpu::BlendFactor::One,
         operation: wgpu::BlendOperation::Add,
     };
-    let alpha_blend = wgpu::BlendDescriptor {
+    let alpha_blend = wgpu::BlendComponent {
         src_factor: wgpu::BlendFactor::One,
         dst_factor: wgpu::BlendFactor::One,
         operation: wgpu::BlendOperation::Add,
